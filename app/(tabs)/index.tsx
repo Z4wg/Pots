@@ -21,6 +21,8 @@ import { useProfile } from '@/hooks/useProfile';
 import { getArchetype } from '@/lib/archetypes';
 import { recordTransaction, resolveWindowEnd, simulateDay, resetDemo, syncAccount } from '@/lib/pots';
 import { useLastSync, markSynced, relativeTime, isStale } from '@/lib/sync';
+import { useBuckets, topUpBucket, PRIMARY_BUCKET_ID } from '@/lib/buckets';
+import * as Haptics from 'expo-haptics';
 import type { BetType, Pot, PotMember } from '@/lib/types';
 
 const COIN = 44;
@@ -43,6 +45,9 @@ export default function Home() {
   const router = useRouter();
   const myArche = getArchetype(profile.archetype);
   const lastSync = useLastSync(me.id);
+  const buckets = useBuckets();
+  const linkedBucket = buckets.find((b) => b.id === PRIMARY_BUCKET_ID) ?? buckets[0];
+  const [movedToBucket, setMovedToBucket] = useState(false);
 
   const [pots, setPots] = useState<Pot[]>([]);
   const [focusedId, setFocusedId] = useState<string>(DEMO.POT_ID);
@@ -119,6 +124,22 @@ export default function Home() {
     }
   };
 
+  // The link to Buckets: what you save by holding the pot can be moved into a
+  // real goal. For a Spend Freeze that's cap − spent; for a save bet, what you
+  // grew. This is the concrete bridge between the social bet and your goals.
+  const protectedPence =
+    myMember && myMember.status !== 'broken'
+      ? lowerBetter
+        ? Math.max((pot?.threshold_pence ?? 0) - myMember.spent_pence, 0)
+        : myMember.current_value_pence
+      : 0;
+  const moveToBucket = () => {
+    if (!linkedBucket || protectedPence <= 0 || movedToBucket) return;
+    topUpBucket(linkedBucket.id, protectedPence);
+    setMovedToBucket(true);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  };
+
   // Dev actions
   const onSimulate = () => simulateDay(focusedId);
   const tomBuysCoffee = () =>
@@ -127,6 +148,7 @@ export default function Home() {
   const onReset = async () => {
     processed.current = new Set();
     setCoins([]);
+    setMovedToBucket(false);
     await resetDemo();
     await loadPots();
     refresh();
@@ -237,11 +259,38 @@ export default function Home() {
           </View>
         )}
 
-        {/* Pod → Buckets shortcut (§7a). */}
-        <Pressable onPress={() => router.push('/(tabs)/buckets')} style={styles.bucketLink}>
-          <Text style={styles.bucketLinkText}>🪣 Plan your money in Buckets</Text>
-          <Text style={styles.bucketLinkArrow}>→</Text>
-        </Pressable>
+        {/* Pot → Buckets: what you save by holding flows into a real goal. */}
+        <View style={styles.linkCard}>
+          <Pressable style={styles.linkHead} onPress={() => router.push('/(tabs)/buckets')}>
+            <Text style={styles.linkEmoji}>{linkedBucket?.emoji ?? '🪣'}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.linkTitle}>
+                Feeds your {linkedBucket?.name ?? 'buckets'}
+              </Text>
+              <Text style={styles.linkSub}>
+                {protectedPence > 0
+                  ? `You’ve protected ${formatPence(protectedPence)} by holding ${
+                      lowerBetter ? 'your cap' : 'the line'
+                    }.`
+                  : 'Pots are the bet · buckets are the goal. Plan yours →'}
+              </Text>
+            </View>
+            <Text style={styles.bucketLinkArrow}>→</Text>
+          </Pressable>
+          {protectedPence > 0 &&
+            (movedToBucket ? (
+              <Text style={styles.movedText}>
+                ✓ Moved {formatPence(protectedPence)} into {linkedBucket?.name}
+              </Text>
+            ) : (
+              <Button
+                label={`Move ${formatPence(protectedPence)} → ${linkedBucket?.name ?? 'bucket'}`}
+                variant="secondary"
+                small
+                onPress={moveToBucket}
+              />
+            ))}
+        </View>
 
         {/* Feed */}
         <Card title="Live feed" style={{ marginTop: space.sm }}>
@@ -435,18 +484,19 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   nudgeText: { ...type.caption, color: colors.gold },
-  bucketLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  linkCard: {
     backgroundColor: colors.surfaceLo,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    padding: 14,
+    gap: 12,
   },
-  bucketLinkText: { ...type.label, color: colors.text },
+  linkHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  linkEmoji: { fontSize: 24 },
+  linkTitle: { ...type.label, color: colors.text },
+  linkSub: { ...type.caption, color: colors.textDim, marginTop: 2 },
+  movedText: { ...type.label, color: colors.lime, textAlign: 'center' },
   bucketLinkArrow: { ...type.h3, color: colors.lime },
   row: {
     flexDirection: 'row',

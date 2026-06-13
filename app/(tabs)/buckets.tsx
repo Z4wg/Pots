@@ -16,7 +16,7 @@ import { Button } from '@/components/Button';
 import { TabActions } from '@/components/TabActions';
 import { colors, radius, space, type } from '@/lib/theme';
 import { formatPence } from '@/lib/money';
-import { useBuckets, addBucket, type Bucket } from '@/lib/buckets';
+import { useBuckets, addBucket, PRIMARY_BUCKET_ID, type Bucket } from '@/lib/buckets';
 
 const ADD_COLORS = [colors.lime, colors.violet, '#5AC8FA', colors.gold];
 
@@ -50,7 +50,15 @@ export default function Buckets() {
     <Screen>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>Buckets</Text>
-        <Text style={styles.caption}>Plan your money. Separate from the bets.</Text>
+        <Text style={styles.caption}>Your long-term goals — separate from the bets.</Text>
+
+        <View style={styles.explainer}>
+          <Text style={styles.explainerText}>
+            <Text style={styles.explainerStrong}>Pots</Text> are short, social bets with friends.{' '}
+            <Text style={styles.explainerStrong}>Buckets</Text> are your own goals. What you save by
+            holding a pot, you move here.
+          </Text>
+        </View>
 
         <View style={styles.summary}>
           <Text style={styles.summaryValue}>{formatPence(totalSaved)}</Text>
@@ -121,7 +129,11 @@ function BucketCard({ bucket, delay }: { bucket: Bucket; delay: number }) {
         <Text style={styles.bucketEmoji}>{bucket.emoji}</Text>
         <View style={{ flex: 1 }}>
           <Text style={styles.bucketName}>{bucket.name}</Text>
-          {!!bucket.targetDate && <Text style={styles.bucketDate}>by {bucket.targetDate}</Text>}
+          {bucket.id === PRIMARY_BUCKET_ID ? (
+            <Text style={styles.fedTag}>⚡ Fed by your pots</Text>
+          ) : (
+            !!bucket.targetDate && <Text style={styles.bucketDate}>by {bucket.targetDate}</Text>
+          )}
         </View>
         <View style={{ alignItems: 'flex-end' }}>
           <Text style={styles.bucketAmount}>{formatPence(bucket.currentPence)}</Text>
@@ -148,6 +160,16 @@ const styles = StyleSheet.create({
   content: { padding: space.lg, paddingBottom: space.xxl, gap: space.md },
   title: { ...type.title, color: colors.text },
   caption: { ...type.body, color: colors.textDim, marginTop: -6 },
+  explainer: {
+    backgroundColor: colors.surfaceLo,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 14,
+  },
+  explainerText: { ...type.caption, color: colors.textDim, lineHeight: 19 },
+  explainerStrong: { color: colors.lime, fontWeight: '800' },
+  fedTag: { ...type.micro, color: colors.lime, marginTop: 2 },
   summary: {
     backgroundColor: colors.surface,
     borderRadius: radius.xl,

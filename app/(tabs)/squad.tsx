@@ -14,19 +14,7 @@ import { useIdentity, setIdentity } from '@/hooks/useIdentity';
 import { DEMO, MAYA, TOM } from '@/lib/demo';
 import { getArchetype } from '@/lib/archetypes';
 import { FRIENDS } from '@/lib/friends';
-import type { MemberStatus, PotMember } from '@/lib/types';
-
-interface Row {
-  key: string;
-  name: string;
-  emoji: string;
-  archetypeTitle: string;
-  archetypeEmoji: string;
-  standing: string;
-  status: MemberStatus | null;
-  streak: number;
-  isMe: boolean;
-}
+import type { PotMember } from '@/lib/types';
 
 function ordinal(n: number): string {
   const s = ['th', 'st', 'nd', 'rd'];
@@ -48,54 +36,11 @@ export default function Squad() {
         : b.current_value_pence - a.current_value_pence
     );
 
-  const liveRows: Row[] = members.map((m: PotMember) => {
-    const arche = getArchetype(m.archetype);
-    const rank = active.findIndex((x) => x.user_id === m.user_id) + 1;
-    const standing =
-      m.status === 'broken'
-        ? `Broke the ${pot?.name ?? 'pot'}`
-        : rank > 0
-        ? `${ordinal(rank)} in ${pot?.name ?? 'the pot'}`
-        : 'In the pot';
-    return {
-      key: m.id,
-      name: m.display_name ?? 'Member',
-      emoji: m.avatar_emoji ?? arche.emoji,
-      archetypeTitle: arche.title,
-      archetypeEmoji: arche.emoji,
-      standing,
-      status: m.status,
-      streak: m.current_streak,
-      isMe: m.user_id === me.id,
-    };
-  });
-
-  const friendRows: Row[] = FRIENDS.map((f) => {
-    const arche = getArchetype(f.archetype);
-    return {
-      key: f.id,
-      name: f.name,
-      emoji: f.emoji,
-      archetypeTitle: arche.title,
-      archetypeEmoji: arche.emoji,
-      standing: f.standing,
-      status: null,
-      streak: f.streak,
-      isMe: false,
-    };
-  });
-
-  const rows = [...liveRows, ...friendRows];
-
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.title}>Squad</Text>
-            <Text style={styles.sub}>Everyone playing across your pots.</Text>
-          </View>
-        </View>
+        <Text style={styles.title}>Squad</Text>
+        <Text style={styles.sub}>Your people — invite them to pots. (Pot rankings live on the Pot tab.)</Text>
 
         {/* Two-phone demo identity toggle. */}
         <Card title="Demo identity">
@@ -124,34 +69,74 @@ export default function Squad() {
           />
         </Card>
 
-        <View style={styles.list}>
-          {rows.map((r, i) => (
-            <Animated.View
-              key={r.key}
-              entering={FadeInDown.delay(i * 60)}
-              layout={LinearTransition.springify()}
-              style={[styles.row, r.isMe && styles.meRow, r.status === 'broken' && styles.brokenRow]}>
-              <Avatar emoji={r.emoji} size={44} ring={r.status === 'broken' ? 'red' : r.isMe ? 'lime' : 'none'} />
-              <View style={{ flex: 1 }}>
-                <View style={styles.nameLine}>
-                  <Text style={styles.name}>{r.name}</Text>
-                  {r.isMe && <Text style={styles.youTag}>YOU</Text>}
+        {/* In the current pot — same pot, so a standing here is meaningful. */}
+        {pot && members.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>IN {pot.name.toUpperCase()}</Text>
+            {members.map((m: PotMember, i) => {
+              const arche = getArchetype(m.archetype);
+              const rank = active.findIndex((x) => x.user_id === m.user_id) + 1;
+              return (
+                <Animated.View
+                  key={m.id}
+                  entering={FadeInDown.delay(i * 50)}
+                  layout={LinearTransition.springify()}
+                  style={[
+                    styles.row,
+                    m.user_id === me.id && styles.meRow,
+                    m.status === 'broken' && styles.brokenRow,
+                  ]}>
+                  <Avatar
+                    emoji={m.avatar_emoji ?? arche.emoji}
+                    size={44}
+                    ring={m.status === 'broken' ? 'red' : m.user_id === me.id ? 'lime' : 'none'}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.nameLine}>
+                      <Text style={styles.name}>{m.display_name ?? 'Member'}</Text>
+                      {m.user_id === me.id && <Text style={styles.youTag}>YOU</Text>}
+                    </View>
+                    <Text style={styles.standing}>
+                      {m.status === 'broken'
+                        ? 'Out — broke the cap'
+                        : `${ordinal(rank)} of ${active.length}`}
+                    </Text>
+                  </View>
+                  <View style={styles.right}>
+                    <Badge emoji={arche.emoji} label={arche.title} />
+                    <StatusPill status={m.status} />
+                  </View>
+                </Animated.View>
+              );
+            })}
+          </View>
+        )}
+
+        {/* Friends — a roster, not a ranking. */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>FRIENDS · {FRIENDS.length}</Text>
+          {FRIENDS.map((f, i) => {
+            const arche = getArchetype(f.archetype);
+            return (
+              <Animated.View
+                key={f.id}
+                entering={FadeInDown.delay(i * 50)}
+                layout={LinearTransition.springify()}
+                style={styles.row}>
+                <Avatar emoji={f.emoji} size={44} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.name}>{f.name}</Text>
+                  <Text style={styles.standing} numberOfLines={1}>
+                    {arche.tagline}
+                  </Text>
                 </View>
-                <Text style={styles.standing}>{r.standing}</Text>
-              </View>
-              <View style={styles.right}>
-                <View style={styles.archeBadge}>
-                  <Text style={styles.archeEmoji}>{r.archetypeEmoji}</Text>
-                  <Text style={styles.archeText}>{r.archetypeTitle}</Text>
+                <View style={styles.right}>
+                  <Badge emoji={arche.emoji} label={arche.title} />
+                  <Text style={styles.streak}>🔥 {f.streak}</Text>
                 </View>
-                {r.status ? (
-                  <StatusPill status={r.status} />
-                ) : (
-                  <Text style={styles.streak}>🔥 {r.streak}</Text>
-                )}
-              </View>
-            </Animated.View>
-          ))}
+              </Animated.View>
+            );
+          })}
         </View>
 
         <TabActions />
@@ -160,14 +145,23 @@ export default function Squad() {
   );
 }
 
+function Badge({ emoji, label }: { emoji: string; label: string }) {
+  return (
+    <View style={styles.archeBadge}>
+      <Text style={styles.archeEmoji}>{emoji}</Text>
+      <Text style={styles.archeText}>{label}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   content: { padding: space.lg, paddingBottom: space.xxl, gap: space.md },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   title: { ...type.title, color: colors.text },
   sub: { ...type.caption, color: colors.textDim, marginTop: 2 },
   toggleRow: { flexDirection: 'row', gap: 10 },
   toggleHint: { ...type.caption, color: colors.textMute },
-  list: { gap: 10 },
+  section: { gap: 10 },
+  sectionLabel: { ...type.micro, color: colors.textMute, letterSpacing: 1.2 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

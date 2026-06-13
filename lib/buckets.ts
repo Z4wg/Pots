@@ -17,6 +17,10 @@ export interface Bucket {
 
 const KEY = 'pots.buckets.v1';
 
+// The bucket that pot winnings flow into — the concrete link between the social
+// bet (pots) and the user's private goals (buckets).
+export const PRIMARY_BUCKET_ID = 'bucket-emergency';
+
 function seedState(): Bucket[] {
   return [
     { id: 'bucket-holiday', name: 'Holiday', emoji: '🏝️', targetPence: 120000, currentPence: 45000, color: '#5AC8FA', targetDate: 'Aug 2026' },
@@ -65,6 +69,16 @@ export function addBucket(input: Omit<Bucket, 'id'>): Bucket {
 
 export function hasBucket(name: string): boolean {
   return state.some((b) => b.name.toLowerCase() === name.toLowerCase());
+}
+
+// Move money into a bucket (e.g. what you saved by holding a pot's cap).
+export function topUpBucket(id: string, pence: number) {
+  if (pence <= 0) return;
+  state = state.map((b) =>
+    b.id === id ? { ...b, currentPence: b.currentPence + pence } : b
+  );
+  emit();
+  persist();
 }
 
 export function resetBuckets() {
