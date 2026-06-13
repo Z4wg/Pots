@@ -86,16 +86,18 @@ function describe(e: PotEvent): { icon: string; text: string; tint: string } {
   }
 }
 
-export function EventFeed({ events }: { events: PotEvent[] }) {
+export function EventFeed({ events, limit }: { events: PotEvent[]; limit?: number }) {
   const ordered = [...events].reverse(); // newest first
+  const shown = limit ? ordered.slice(0, limit) : ordered;
+  const hidden = ordered.length - shown.length;
 
   if (ordered.length === 0) {
-    return <Text style={styles.empty}>No activity yet. Check in to get things moving.</Text>;
+    return <Text style={styles.empty}>No activity yet. Sync to get things moving.</Text>;
   }
 
   return (
     <View style={styles.list}>
-      {ordered.map((e) => {
+      {shown.map((e) => {
         const d = describe(e);
         return (
           <Animated.View
@@ -104,10 +106,13 @@ export function EventFeed({ events }: { events: PotEvent[] }) {
             layout={LinearTransition.springify()}
             style={styles.row}>
             <Text style={styles.icon}>{d.icon}</Text>
-            <Text style={[styles.text, { color: d.tint }]}>{d.text}</Text>
+            <Text style={[styles.text, { color: d.tint }]} numberOfLines={1}>
+              {d.text}
+            </Text>
           </Animated.View>
         );
       })}
+      {hidden > 0 && <Text style={styles.more}>+{hidden} more</Text>}
     </View>
   );
 }
@@ -127,4 +132,5 @@ const styles = StyleSheet.create({
   icon: { fontSize: 16 },
   text: { ...type.body, flexShrink: 1 },
   empty: { ...type.body, color: colors.textMute, paddingVertical: 12 },
+  more: { ...type.caption, color: colors.textMute, textAlign: 'center', paddingTop: 2 },
 });

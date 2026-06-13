@@ -12,6 +12,7 @@ import { MoneyCounter } from '@/components/MoneyCounter';
 import { EventFeed } from '@/components/EventFeed';
 import { PayoutCoin, type CoinSpec } from '@/components/PayoutCoin';
 import { colors, radius, space, type } from '@/lib/theme';
+import { formatPence } from '@/lib/money';
 import { DEMO } from '@/lib/demo';
 import { backend, USING_MOCK } from '@/lib/backend';
 import { usePot } from '@/hooks/usePotRealtime';
@@ -175,6 +176,11 @@ export default function Home() {
             style={styles.totalValue}
             color={colors.lime}
           />
+          {!!pot?.goal_label && (
+            <View style={styles.goalPill}>
+              <Text style={styles.goalText}>🎯 {pot.goal_label}</Text>
+            </View>
+          )}
           <View style={styles.metaRow}>
             <Text style={styles.metaText}>⏳ {daysLeft} days left</Text>
             {myMember && myRank > 0 && (
@@ -239,7 +245,7 @@ export default function Home() {
 
         {/* Feed */}
         <Card title="Live feed" style={{ marginTop: space.sm }}>
-          <EventFeed events={events} />
+          <EventFeed events={events} limit={4} />
         </Card>
 
         <Button label="+ Start a new POT" variant="secondary" onPress={() => router.push('/create')} />
@@ -277,7 +283,19 @@ function LeaderRow({
   const broken = member.status === 'broken';
   const archetype = getArchetype(member.archetype);
   const value = lowerBetter ? member.spent_pence : member.current_value_pence;
-  const metric = lowerBetter ? 'spent' : 'saved';
+  const threshold = pot.threshold_pence;
+
+  // How close they are to the cap (spend) / target (save), as a %.
+  const pct = threshold > 0 ? Math.round((value / threshold) * 100) : 0;
+  const over = lowerBetter && pot.comparator === 'under' && value > threshold;
+  const warn = !over && !broken && pct >= 80;
+  const pctColor = broken || over ? colors.red : warn ? colors.gold : colors.lime;
+  const progressText =
+    threshold > 0
+      ? `${pct}% ${lowerBetter ? 'of cap' : 'to target'}`
+      : lowerBetter
+      ? 'no-spend'
+      : 'saving';
 
   const arrow =
     member.prev_rank != null && member.rank != null && member.prev_rank !== member.rank
@@ -322,6 +340,7 @@ function LeaderRow({
             <View style={[styles.saveFill, { width: `${Math.max(saveRatio * 100, 3)}%` }]} />
           </View>
         )}
+        <Text style={[styles.rowPct, { color: pctColor }]}>{progressText}</Text>
       </View>
       <View style={styles.rowRight}>
         <MoneyCounter
@@ -329,7 +348,9 @@ function LeaderRow({
           style={styles.rowValue}
           color={broken ? colors.textMute : colors.text}
         />
-        <Text style={styles.rowMetric}>{metric}</Text>
+        <Text style={styles.rowMetric}>
+          {threshold > 0 ? `of ${formatPence(threshold)}` : lowerBetter ? 'spent' : 'saved'}
+        </Text>
       </View>
     </Animated.View>
   );
@@ -380,6 +401,16 @@ const styles = StyleSheet.create({
   potName: { ...type.h2, color: colors.text },
   betType: { ...type.micro, color: colors.lime, letterSpacing: 1.2 },
   totalValue: { fontSize: 64, marginTop: 4 },
+  goalPill: {
+    marginTop: 8,
+    backgroundColor: colors.surfaceLo,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  goalText: { ...type.label, color: colors.text },
   metaRow: { flexDirection: 'row', gap: 16, marginTop: 6 },
   metaText: { ...type.caption, color: colors.textDim },
   board: { gap: 10, position: 'relative' },
@@ -453,7 +484,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   saveFill: { height: '100%', borderRadius: radius.pill, backgroundColor: colors.lime },
-  rowRight: { alignItems: 'flex-end', minWidth: 64 },
+  rowPct: { ...type.micro, fontWeight: '700' },
+  rowRight: { alignItems: 'flex-end', minWidth: 70 },
   rowValue: { fontSize: 18 },
   rowMetric: { ...type.micro, color: colors.textMute },
   devRow: {
