@@ -46,6 +46,13 @@ export function ResultCard({ archetypeKey, onStart }: Props) {
         </View>
       </Animated.View>
 
+      <View style={styles.purpose}>
+        <Text style={styles.purposeText}>
+          ✨ Your <Text style={styles.purposeStrong}>Coach</Text> uses this to tailor the money
+          tips and savings buckets it suggests for you.
+        </Text>
+      </View>
+
       <Text style={styles.screenshotHint}>Screenshot to share your card</Text>
 
       <View style={styles.actions}>
@@ -97,6 +104,15 @@ const styles = StyleSheet.create({
   },
   brand: { ...type.h3, color: colors.text, fontWeight: '900', letterSpacing: 1 },
   brandHint: { ...type.caption, color: colors.textMute },
+  purpose: {
+    backgroundColor: 'rgba(158,123,255,0.12)',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(158,123,255,0.4)',
+    padding: 14,
+  },
+  purposeText: { ...type.caption, color: colors.textDim, lineHeight: 19, textAlign: 'center' },
+  purposeStrong: { color: colors.violet, fontWeight: '800' },
   screenshotHint: { ...type.caption, color: colors.textMute, textAlign: 'center' },
   actions: { gap: 12 },
 });

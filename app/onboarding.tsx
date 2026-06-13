@@ -61,7 +61,7 @@ export default function Onboarding() {
         {/* §1 — hero headline: the screen's purpose, unmistakable on open. */}
         <View style={styles.hero}>
           <Text style={styles.heroTitle}>Find your{'\n'}money type</Text>
-          <Text style={styles.heroSub}>{QUIZ.length} quick swipes.</Text>
+          <Text style={styles.heroSub}>{QUIZ.length} quick swipes — so your Coach gets you.</Text>
           <View style={styles.dots}>
             {QUIZ.map((_, i) => (
               <View key={i} style={[styles.dot, i <= index && styles.dotOn]} />

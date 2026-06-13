@@ -119,7 +119,7 @@ export default function Coach() {
           <Avatar emoji="🤖" size={44} ring="lime" />
           <View>
             <Text style={styles.title}>Coach</Text>
-            <Text style={styles.sub}>Helps you build buckets — never calls the bet.</Text>
+            <Text style={styles.sub}>Advice tuned to your money type — never calls the bet.</Text>
           </View>
         </View>
 
