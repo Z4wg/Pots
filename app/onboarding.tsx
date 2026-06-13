@@ -231,7 +231,7 @@ function AnswerButton({
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingHorizontal: space.lg, paddingTop: space.xl, paddingBottom: space.xl },
-  cardArea: { flex: 1, justifyContent: 'center' },
+  cardArea: { flex: 1, paddingTop: space.xl },
   hero: { gap: 10 },
   heroTitle: { fontSize: 46, fontWeight: '900', letterSpacing: -1.5, color: colors.text, lineHeight: 48 },
   heroSub: { ...type.h3, color: colors.lime, fontWeight: '700' },
