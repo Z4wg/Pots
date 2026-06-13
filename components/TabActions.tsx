@@ -19,7 +19,7 @@ export function TabActions({ potId = DEMO.POT_ID }: { potId?: string }) {
       <Button
         label="Invite friends"
         variant="secondary"
-        onPress={() => router.push(`/invite/${potId}`)}
+        onPress={() => router.push(`/invite/${potId}?ctx=tab`)}
         style={styles.btn}
       />
     </View>

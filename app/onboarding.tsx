@@ -56,7 +56,7 @@ export default function Onboarding() {
   const q = QUIZ[index];
 
   return (
-    <Screen>
+    <Screen onClose={() => router.replace('/connect')} closeLabel="Skip">
       <View style={styles.container}>
         {/* §1 — hero headline: the screen's purpose, unmistakable on open. */}
         <View style={styles.hero}>
@@ -69,8 +69,10 @@ export default function Onboarding() {
           </View>
         </View>
 
-        {/* §2 — the card + its two answers are one tight unit. */}
-        <SwipeCard key={q.id} question={q} onPick={pick} />
+        {/* §2 — the card + its two answers are one tight unit, centered. */}
+        <View style={styles.cardArea}>
+          <SwipeCard key={q.id} question={q} onPick={pick} />
+        </View>
       </View>
     </Screen>
   );
@@ -200,7 +202,8 @@ function AnswerButton({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingHorizontal: space.lg, paddingTop: space.md, justifyContent: 'space-between', paddingBottom: space.xl },
+  container: { flex: 1, paddingHorizontal: space.lg, paddingTop: space.xl, paddingBottom: space.xl },
+  cardArea: { flex: 1, justifyContent: 'center' },
   hero: { gap: 10 },
   heroTitle: { fontSize: 46, fontWeight: '900', letterSpacing: -1.5, color: colors.text, lineHeight: 48 },
   heroSub: { ...type.h3, color: colors.lime, fontWeight: '700' },

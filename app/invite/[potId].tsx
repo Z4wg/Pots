@@ -9,33 +9,33 @@ import { InviteSheet } from '@/components/InviteSheet';
 import { colors, space, type } from '@/lib/theme';
 import { formatPence } from '@/lib/money';
 import { backend } from '@/lib/backend';
-import { completeOnboarding, useProfile } from '@/hooks/useProfile';
+import { completeOnboarding } from '@/hooks/useProfile';
 import type { Pot } from '@/lib/types';
 
 export default function Invite() {
-  const { potId } = useLocalSearchParams<{ potId: string }>();
+  const { potId, ctx } = useLocalSearchParams<{ potId: string; ctx?: string }>();
   const router = useRouter();
-  const profile = useProfile();
+  const fromTab = ctx === 'tab';
   const [pot, setPot] = useState<Pot | null>(null);
 
   useEffect(() => {
     if (potId) backend.getPot(potId).then(setPot).catch(() => {});
   }, [potId]);
 
-  // Re-entrant: during onboarding this finishes the flow; from a tab it just
-  // pops back.
+  // Re-entrant: opened from a tab (ctx=tab) → just pop back to that tab.
+  // Opened at the end of the create flow → finish onboarding and land on the
+  // app's main POT screen (never back on the create form).
   const done = () => {
-    if (profile.onboarded) {
-      if (router.canGoBack()) router.back();
-      else router.replace('/(tabs)');
+    if (fromTab && router.canGoBack()) {
+      router.back();
       return;
     }
-    completeOnboarding();
+    completeOnboarding(); // idempotent
     router.replace('/(tabs)');
   };
 
   return (
-    <Screen>
+    <Screen onClose={done}>
       <ScrollView contentContainerStyle={styles.wrap} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>Invite your squad</Text>
         <Text style={styles.sub}>
@@ -46,7 +46,7 @@ export default function Invite() {
           <InviteSheet potId={potId} inviteCode={pot?.invite_code} />
         </Card>
 
-        <Button label={profile.onboarded ? 'Done' : 'Enter POTS →'} onPress={done} />
+        <Button label={fromTab ? 'Done' : 'Enter POTS →'} onPress={done} />
       </ScrollView>
     </Screen>
   );

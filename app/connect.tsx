@@ -18,6 +18,7 @@ import { colors, radius, space, type } from '@/lib/theme';
 import { formatPence } from '@/lib/money';
 import { backend } from '@/lib/backend';
 import { useIdentity } from '@/hooks/useIdentity';
+import { completeOnboarding } from '@/hooks/useProfile';
 import {
   PROVIDERS,
   getProvider,
@@ -58,6 +59,16 @@ export default function Connect() {
   const [accountId, setAccountId] = useState<string>('savings');
   const [connection, setConnection] = useState<BankConnection | null>(null);
 
+  // ✕ — exit the connect flow. From create → back; from onboarding → into the app.
+  const exitConnect = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    completeOnboarding();
+    router.replace('/(tabs)');
+  };
+
   const choose = (p: BankProvider) => {
     Haptics.selectionAsync().catch(() => {});
     setProvider(p);
@@ -97,7 +108,7 @@ export default function Connect() {
   };
 
   return (
-    <Screen>
+    <Screen onClose={exitConnect}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {phase === 'providers' && (
           <Animated.View entering={FadeIn} style={styles.block}>
