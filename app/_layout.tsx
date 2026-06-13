@@ -8,6 +8,9 @@ import 'react-native-reanimated';
 import { colors } from '@/lib/theme';
 import { hydrateIdentity } from '@/hooks/useIdentity';
 import { hydrateProfile } from '@/hooks/useProfile';
+import { hydrateInvites } from '@/lib/invites';
+import { hydrateBuckets } from '@/lib/buckets';
+import { hydrateSync } from '@/lib/sync';
 
 export const unstable_settings = {
   anchor: 'index',
@@ -17,6 +20,9 @@ export default function RootLayout() {
   useEffect(() => {
     hydrateIdentity();
     hydrateProfile();
+    hydrateInvites();
+    hydrateBuckets();
+    hydrateSync();
   }, []);
 
   return (

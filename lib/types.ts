@@ -22,7 +22,8 @@ export type EventKind =
   | 'milestone'
   | 'paid'
   | 'rank_up'
-  | 'rank_down';
+  | 'rank_down'
+  | 'sync'; // v2: account synced from the connected bank (replaces self-reported check-in)
 
 export interface User {
   id: string;

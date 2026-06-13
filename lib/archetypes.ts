@@ -160,8 +160,12 @@ export function getArchetype(key: string | undefined | null): Archetype {
   return ARCHETYPES.strategist;
 }
 
-// ---- The 5-question single-select quiz ----
-// Each option scores +1 for exactly one archetype (its `tag`). Don't show tags.
+// ---- The binary swipe quiz (v2 §2) ----
+// Each question is ONE swipe card with exactly two answers: options[0] = LEFT,
+// options[1] = RIGHT. Swiping toward an answer (or tapping it) scores +1 for its
+// archetype `tag`. The six archetypes each appear exactly twice across the six
+// questions, so the highest tally wins (ties resolved by ARCHETYPE_PRIORITY).
+// Scoring is unchanged from the old quiz — only the interaction is binary now.
 
 export interface QuizOption {
   label: string;
@@ -171,63 +175,56 @@ export interface QuizOption {
 export interface QuizQuestion {
   id: string;
   prompt: string;
-  options: QuizOption[];
+  options: [QuizOption, QuizOption]; // [left, right]
 }
 
 export const QUIZ: QuizQuestion[] = [
   {
     id: 'q1',
-    prompt: 'It’s payday. What happens to the money in the first 24 hours?',
+    prompt: 'Surprise £200 lands. First instinct?',
     options: [
-      { label: 'Straight to savings before I can touch it.', tag: 'vault' },
-      { label: 'Into investments / fuelling my side hustle.', tag: 'hustler' },
-      { label: 'Every pound already has a job — it goes where the budget says.', tag: 'strategist' },
-      { label: 'Treat myself first. Details later.', tag: 'baller' },
-      { label: 'No plan — it just kind of flows.', tag: 'free_spirit' },
+      { label: 'Treat myself tonight', tag: 'baller' },
+      { label: 'Move it to savings', tag: 'vault' },
     ],
   },
   {
     id: 'q2',
-    prompt: 'A friend texts: spontaneous trip, leaves Friday. You—',
+    prompt: 'Your monthly budget is…',
     options: [
-      { label: 'Covered — I’ve got a “fun” fund for exactly this.', tag: 'strategist' },
-      { label: 'I’m in. Money worries are for Monday.', tag: 'baller' },
-      { label: 'Let me flip something to fund it — let’s go.', tag: 'hustler' },
-      { label: 'Yes! …and I’m buying a whole new trip outfit.', tag: 'magpie' },
-      { label: 'Pass. Not in this month’s plan.', tag: 'vault' },
+      { label: 'Vibes — I wing it', tag: 'free_spirit' },
+      { label: 'Mapped to the penny', tag: 'strategist' },
     ],
   },
   {
     id: 'q3',
-    prompt: 'Your recent purchases are mostly—',
+    prompt: 'Spare £100 burning a hole. You…',
     options: [
-      { label: 'Barely anything — I don’t spend much.', tag: 'vault' },
-      { label: 'Random things I saw and had to have.', tag: 'magpie' },
-      { label: 'Tools, courses, stuff that pays me back.', tag: 'hustler' },
-      { label: 'Dinners, nights out, experiences.', tag: 'baller' },
-      { label: 'Honestly couldn’t tell you.', tag: 'free_spirit' },
+      { label: 'Buy the shiny thing', tag: 'magpie' },
+      { label: 'Flip it into more', tag: 'hustler' },
     ],
   },
   {
     id: 'q4',
-    prompt: '£500 lands in your account by surprise. Be honest:',
+    prompt: 'A flash sale ends at midnight. You…',
     options: [
-      { label: 'Invest it — make it work.', tag: 'hustler' },
-      { label: 'Split it by my rules: some saved, some fun.', tag: 'strategist' },
-      { label: 'Something shiny is already in my cart.', tag: 'magpie' },
-      { label: 'Straight to savings, untouched.', tag: 'vault' },
-      { label: 'Gone by the weekend, zero regrets.', tag: 'baller' },
+      { label: 'Add to cart, obviously', tag: 'magpie' },
+      { label: 'Skip it — not budgeted', tag: 'vault' },
     ],
   },
   {
     id: 'q5',
-    prompt: 'Checking your bank balance feels like—',
+    prompt: 'Group dinner — who grabs the bill?',
     options: [
-      { label: 'Calm — I know the number before I look.', tag: 'strategist' },
-      { label: 'A thrill — I love watching it grow.', tag: 'vault' },
-      { label: 'Mild dread, so I avoid it.', tag: 'free_spirit' },
-      { label: 'Depends what I just bought…', tag: 'magpie' },
-      { label: 'Fine — I’m focused on growing it, not guarding it.', tag: 'hustler' },
+      { label: 'Me. My treat 🍾', tag: 'baller' },
+      { label: 'Split it, exactly by item', tag: 'strategist' },
+    ],
+  },
+  {
+    id: 'q6',
+    prompt: 'Checking your balance feels…',
+    options: [
+      { label: 'Mild dread, I avoid it', tag: 'free_spirit' },
+      { label: 'A thrill — watch it grow', tag: 'hustler' },
     ],
   },
 ];

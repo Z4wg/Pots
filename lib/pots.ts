@@ -1,5 +1,8 @@
 import { backend } from './backend';
 import type { PotMember, EventKind } from './types';
+import { resetInvites } from './invites';
+import { resetBuckets } from './buckets';
+import { resetSync } from './sync';
 
 // ===========================================================================
 // CORE LOGIC: "the bank is the referee".
@@ -51,9 +54,14 @@ export async function recordTransaction(
     amount_pence: amountPence,
   });
 
-  await insertEvent(potId, 'spend', name, { merchant, category, amount: amountPence });
-
   const pot = await backend.getPot(potId);
+
+  // v2 §6: the feed only surfaces spend that ties to the bet's metric — an
+  // in-category purchase. Out-of-category spend is recorded but stays off-feed.
+  if (category === pot.category) {
+    await insertEvent(potId, 'spend', name, { merchant, category, amount: amountPence });
+  }
+
   if (category !== pot.category) return;
 
   const m = await backend.getMember(potId, userId);
@@ -160,6 +168,57 @@ export async function recomputePotTotal(potId: string): Promise<void> {
 
 export async function resetDemo(): Promise<void> {
   await backend.resetDemo();
+  // v2: also reload the local-only stores so the demo runs identically.
+  resetInvites();
+  resetBuckets();
+  resetSync();
+}
+
+// ---------------------------------------------------------------------------
+// syncAccount — v2 §5. Pulls a single member's latest bank figures and updates
+// their standing. Replaces the self-reported "I held today": progress now comes
+// from the (mocked) bank, never a human claim. Posts a 'sync' feed event and
+// recomputes ranks. For a spend_freeze pot it pulls in-category spend, which can
+// cross the cap and auto-break the bet (firing the payout slide) — so this also
+// doubles as the "make the leaderboard move on stage" control. Data is referee.
+// ---------------------------------------------------------------------------
+export async function syncAccount(potId: string, userId: string): Promise<void> {
+  const pot = await backend.getPot(potId);
+  const m = await backend.getMember(potId, userId);
+  if (!m || m.status !== 'active') return;
+  const name = await backend.getUserName(userId);
+  const conn = await backend.getBankConnection(userId);
+
+  if (pot.bet_type === 'spend_freeze') {
+    const spend = rand(150, 1800);
+    m.spent_pence += spend;
+    m.current_value_pence = m.spent_pence;
+    await saveMember(m);
+    if (conn) {
+      conn.spend_by_category = {
+        ...conn.spend_by_category,
+        [pot.category]: (conn.spend_by_category[pot.category] ?? 0) + spend,
+      };
+      conn.balance_pence -= spend;
+      await backend.upsertBankConnection(conn);
+    }
+    await insertEvent(potId, 'sync', name, { metric: 'spend', amount: spend, category: pot.category });
+    if (pot.comparator === 'under' && m.spent_pence > pot.threshold_pence) {
+      await breakBet(potId, userId); // crosses cap -> payout slide
+    }
+  } else {
+    const saved = rand(500, 4000);
+    m.current_value_pence += saved;
+    await saveMember(m);
+    if (conn) {
+      conn.savings_balance_pence += saved;
+      conn.balance_pence -= saved;
+      await backend.upsertBankConnection(conn);
+    }
+    await insertEvent(potId, 'sync', name, { metric: 'save', amount: saved, total: m.current_value_pence });
+  }
+
+  await recomputeRanks(potId);
 }
 
 // ---------------------------------------------------------------------------

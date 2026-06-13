@@ -18,10 +18,16 @@ import { colors, radius, space, type } from '@/lib/theme';
 import { formatPence } from '@/lib/money';
 import { backend } from '@/lib/backend';
 import { useIdentity } from '@/hooks/useIdentity';
-import { PROVIDERS, getProvider, recentTransactions, type BankProvider } from '@/lib/bankSeed';
+import {
+  PROVIDERS,
+  getProvider,
+  recentTransactions,
+  CONNECT_ACCOUNTS,
+  type BankProvider,
+} from '@/lib/bankSeed';
 import type { BankConnection } from '@/lib/types';
 
-type Phase = 'providers' | 'consent' | 'connecting' | 'connected';
+type Phase = 'providers' | 'consent' | 'accounts' | 'connecting' | 'connected';
 
 function uuidv4(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -31,11 +37,25 @@ function uuidv4(): string {
   });
 }
 
+// Brand mark — a Revolut-style monogram. Bank-auth styling without the real asset.
+function BankMark({ provider, size = 44 }: { provider: BankProvider; size?: number }) {
+  return (
+    <View
+      style={[
+        styles.mark,
+        { width: size, height: size, borderRadius: size / 2, backgroundColor: provider.accent },
+      ]}>
+      <Text style={[styles.markText, { fontSize: size * 0.42 }]}>{provider.initials}</Text>
+    </View>
+  );
+}
+
 export default function Connect() {
   const router = useRouter();
   const me = useIdentity();
   const [phase, setPhase] = useState<Phase>('providers');
   const [provider, setProvider] = useState<BankProvider | null>(null);
+  const [accountId, setAccountId] = useState<string>('savings');
   const [connection, setConnection] = useState<BankConnection | null>(null);
 
   const choose = (p: BankProvider) => {
@@ -44,24 +64,27 @@ export default function Connect() {
     setPhase('consent');
   };
 
-  const allow = async () => {
+  const allow = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setPhase('accounts');
+  };
+
+  const connectAccount = async () => {
     if (!provider) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     setPhase('connecting');
+    const personal = CONNECT_ACCOUNTS.find((a) => a.kind === 'personal')!;
+    const savings = CONNECT_ACCOUNTS.find((a) => a.kind === 'savings')!;
+    const tracked = CONNECT_ACCOUNTS.find((a) => a.id === accountId) ?? savings;
     const existing = await backend.getBankConnection(me.id);
-    const base: BankConnection =
-      existing ?? {
-        id: uuidv4(),
-        user_id: me.id,
-        provider: provider.id,
-        balance_pence: 95000,
-        savings_balance_pence: 30000,
-        spend_by_category: { cafe: 0, going_out: 0, grocery: 0, transport: 0 },
-        connected_at: new Date().toISOString(),
-      };
     const conn: BankConnection = {
-      ...base,
+      id: existing?.id ?? uuidv4(),
+      user_id: me.id,
       provider: provider.id,
+      balance_pence: personal.balance_pence,
+      savings_balance_pence: tracked.balance_pence,
+      spend_by_category:
+        existing?.spend_by_category ?? { cafe: 0, going_out: 0, grocery: 0, transport: 0 },
       connected_at: new Date().toISOString(),
     };
     // Convincing 1.6s "securely connecting…" beat.
@@ -88,9 +111,7 @@ export default function Connect() {
                   key={p.id}
                   onPress={() => choose(p)}
                   style={({ pressed }) => [styles.provider, pressed && styles.providerPressed]}>
-                  <View style={[styles.logo, { backgroundColor: p.accent }]}>
-                    <Text style={styles.logoText}>{p.initials}</Text>
-                  </View>
+                  <BankMark provider={p} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.providerName}>{p.name}</Text>
                     <Text style={[styles.providerSub, p.primary && { color: colors.lime }]}>
@@ -105,27 +126,70 @@ export default function Connect() {
           </Animated.View>
         )}
 
+        {/* Fake OAuth consent — styled like a bank auth page. */}
         {phase === 'consent' && provider && (
           <Animated.View entering={FadeIn} style={styles.consentWrap}>
+            <View style={[styles.authBar, { backgroundColor: provider.accent }]}>
+              <BankMark provider={provider} size={30} />
+              <Text style={styles.authBarText}>{provider.name} · Secure sign-in</Text>
+              <Text style={styles.authLock}>🔒</Text>
+            </View>
             <View style={styles.consentCard}>
-              <View style={[styles.logo, styles.logoBig, { backgroundColor: provider.accent }]}>
-                <Text style={[styles.logoText, { fontSize: 26 }]}>{provider.initials}</Text>
-              </View>
-              <Text style={styles.consentBank}>{provider.name}</Text>
               <Text style={styles.consentTitle}>POTS wants to access your account</Text>
+              <Text style={styles.consentBank}>Signed in as {me.display_name.toLowerCase()}@{provider.id}.com</Text>
               <View style={styles.scopeList}>
-                <Scope text="Your account balance" />
-                <Scope text="Your savings balance" />
-                <Scope text="Recent transactions & categories" />
+                <Scope text="View your account balance" />
+                <Scope text="View your savings balance" />
+                <Scope text="View recent transactions & categories" />
               </View>
               <Text style={styles.consentFine}>
-                You can disconnect anytime. POTS never moves money without your say.
+                POTS can read balances to referee the bet. It can never move money.
               </Text>
             </View>
             <View style={styles.consentActions}>
-              <Button label={`Allow ${provider.name}`} onPress={allow} />
+              <Button label="Allow access" onPress={allow} />
               <Button label="Deny" variant="ghost" onPress={() => setPhase('providers')} />
             </View>
+          </Animated.View>
+        )}
+
+        {/* Account selection — Savings is what POTS tracks. */}
+        {phase === 'accounts' && provider && (
+          <Animated.View entering={FadeIn} style={styles.block}>
+            <View style={[styles.authBar, { backgroundColor: provider.accent }]}>
+              <BankMark provider={provider} size={30} />
+              <Text style={styles.authBarText}>{provider.name} · Choose account</Text>
+              <Text style={styles.authLock}>🔒</Text>
+            </View>
+            <Text style={styles.title}>Which account?</Text>
+            <Text style={styles.sub}>Pick the account POTS should track for this pot.</Text>
+            <View style={{ gap: 10 }}>
+              {CONNECT_ACCOUNTS.map((a) => {
+                const on = accountId === a.id;
+                return (
+                  <Pressable
+                    key={a.id}
+                    onPress={() => {
+                      setAccountId(a.id);
+                      Haptics.selectionAsync().catch(() => {});
+                    }}
+                    style={[styles.account, on && styles.accountOn]}>
+                    <View style={[styles.radio, on && styles.radioOn]}>
+                      {on && <View style={styles.radioDot} />}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View style={styles.accountHead}>
+                        <Text style={styles.accountLabel}>{a.label}</Text>
+                        {a.kind === 'savings' && <Text style={styles.trackTag}>TRACKED</Text>}
+                      </View>
+                      <Text style={styles.accountSub}>{a.subtitle}</Text>
+                    </View>
+                    <Text style={styles.accountBalance}>{formatPence(a.balance_pence)}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Button label="Connect account" onPress={connectAccount} />
           </Animated.View>
         )}
 
@@ -139,9 +203,7 @@ export default function Connect() {
         {phase === 'connected' && connection && (
           <Animated.View entering={FadeInDown.springify().damping(15)} style={styles.block}>
             <View style={styles.connectedHead}>
-              <View style={[styles.logo, { backgroundColor: getProvider(connection.provider).accent }]}>
-                <Text style={styles.logoText}>{getProvider(connection.provider).initials}</Text>
-              </View>
+              <BankMark provider={getProvider(connection.provider)} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.connectedTitle}>{getProvider(connection.provider).name} connected ✓</Text>
                 <Text style={styles.sub}>Demo transactions loaded.</Text>
@@ -153,8 +215,8 @@ export default function Connect() {
                 <Text style={styles.balanceLabel}>BALANCE</Text>
                 <Text style={styles.balanceValue}>{formatPence(connection.balance_pence)}</Text>
               </View>
-              <View style={styles.balanceBox}>
-                <Text style={styles.balanceLabel}>SAVINGS</Text>
+              <View style={[styles.balanceBox, styles.balanceBoxTracked]}>
+                <Text style={styles.balanceLabel}>SAVINGS · TRACKED</Text>
                 <Text style={[styles.balanceValue, { color: colors.lime }]}>
                   {formatPence(connection.savings_balance_pence)}
                 </Text>
@@ -223,32 +285,77 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   providerPressed: { borderColor: colors.lime, backgroundColor: colors.surfaceHi },
-  logo: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  logoBig: { width: 64, height: 64, borderRadius: 18 },
-  logoText: { color: colors.white, fontWeight: '900', fontSize: 18 },
+  mark: { alignItems: 'center', justifyContent: 'center' },
+  markText: { color: colors.white, fontWeight: '900' },
   providerName: { ...type.h3, color: colors.text },
   providerSub: { ...type.caption, color: colors.textDim, marginTop: 2 },
   chevron: { ...type.title, color: colors.textMute },
   demoNote: { ...type.caption, color: colors.textMute, textAlign: 'center', marginTop: 8 },
+  // fake OAuth chrome
+  authBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  authBarText: { ...type.label, color: colors.white, flex: 1, fontWeight: '800' },
+  authLock: { fontSize: 14 },
   // consent
-  consentWrap: { flex: 1, gap: space.lg, justifyContent: 'center' },
+  consentWrap: { gap: space.md },
   consentCard: {
     backgroundColor: colors.surface,
     borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: colors.border,
     padding: space.xl,
-    alignItems: 'center',
     gap: 10,
   },
-  consentBank: { ...type.h3, color: colors.text },
-  consentTitle: { ...type.h2, color: colors.text, textAlign: 'center', marginTop: 4 },
-  scopeList: { gap: 8, alignSelf: 'stretch', marginTop: 10 },
+  consentBank: { ...type.caption, color: colors.textMute },
+  consentTitle: { ...type.h2, color: colors.text },
+  scopeList: { gap: 10, marginTop: 6 },
   scope: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   scopeDot: { color: colors.lime, fontWeight: '900' },
   scopeText: { ...type.body, color: colors.textDim },
-  consentFine: { ...type.caption, color: colors.textMute, textAlign: 'center', marginTop: 8 },
+  consentFine: { ...type.caption, color: colors.textMute, marginTop: 8 },
   consentActions: { gap: 12 },
+  // accounts
+  account: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
+  },
+  accountOn: { borderColor: colors.lime, backgroundColor: colors.surfaceHi },
+  radio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioOn: { borderColor: colors.lime },
+  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.lime },
+  accountHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  accountLabel: { ...type.h3, color: colors.text },
+  trackTag: {
+    ...type.micro,
+    color: colors.black,
+    backgroundColor: colors.lime,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+  },
+  accountSub: { ...type.caption, color: colors.textMute, marginTop: 2 },
+  accountBalance: { ...type.h3, color: colors.text },
   // connecting
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 20, paddingVertical: 80 },
   spinner: { width: 44, height: 44, borderRadius: 22, borderWidth: 4 },
@@ -266,6 +373,7 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 4,
   },
+  balanceBoxTracked: { borderColor: 'rgba(200,255,0,0.4)' },
   balanceLabel: { ...type.micro, color: colors.textMute },
   balanceValue: { ...type.h2, color: colors.text },
   txnHeader: { ...type.label, color: colors.textDim, textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 4 },

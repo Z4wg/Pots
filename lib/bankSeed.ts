@@ -21,6 +21,21 @@ export function getProvider(id: string): BankProvider {
   return PROVIDERS.find((p) => p.id === id) ?? PROVIDERS[0];
 }
 
+// Accounts shown in the fake OAuth account-picker (§4). The Savings account is
+// the one POTS tracks for the bet. Integer pence.
+export interface BankAccount {
+  id: string;
+  label: string;
+  subtitle: string;
+  balance_pence: number;
+  kind: 'personal' | 'savings';
+}
+
+export const CONNECT_ACCOUNTS: BankAccount[] = [
+  { id: 'personal', label: 'Personal', subtitle: 'Everyday spending', balance_pence: 124050, kind: 'personal' },
+  { id: 'savings', label: 'Savings Vault', subtitle: 'POTS tracks this for the bet', balance_pence: 86000, kind: 'savings' },
+];
+
 // Seeded "recent transactions" shown after connecting (display-only). Negative
 // = spend, positive = income. Integer pence.
 export interface SeedTxn {

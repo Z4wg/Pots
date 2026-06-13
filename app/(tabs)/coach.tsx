@@ -1,124 +1,167 @@
+import { useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import { useRouter } from 'expo-router';
+import * as Haptics from 'expo-haptics';
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 
 import { Screen } from '@/components/Screen';
-import { Card } from '@/components/Card';
+import { Button } from '@/components/Button';
 import { Avatar } from '@/components/Avatar';
+import { TabActions } from '@/components/TabActions';
 import { colors, radius, space, type } from '@/lib/theme';
 import { formatPence } from '@/lib/money';
-import { usePot } from '@/hooks/usePotRealtime';
+import { useProfile } from '@/hooks/useProfile';
 import { useIdentity } from '@/hooks/useIdentity';
-import { DEMO } from '@/lib/demo';
-import type { Pot, PotMember } from '@/lib/types';
+import { getArchetype, type ArchetypeKey } from '@/lib/archetypes';
+import { addBucket, hasBucket } from '@/lib/buckets';
 
-interface CoachCard {
-  id: string;
-  tone: 'warn' | 'win' | 'lose' | 'info';
+interface Suggestion {
+  name: string;
   emoji: string;
-  headline: string;
-  body: string;
+  targetPence: number;
+  color: string;
 }
 
-function buildCards(pot: Pot, members: PotMember[], meId: string): CoachCard[] {
-  const cards: CoachCard[] = [];
-  const daysLeft = Math.max(
-    0,
-    Math.ceil((new Date(pot.window_end).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-  );
-
-  for (const m of members) {
-    const isMe = m.user_id === meId;
-    const who = isMe ? 'Your' : `${m.display_name}'s`;
-    const whoSubject = isMe ? "you're" : `${m.display_name} is`;
-    const ratio = pot.threshold_pence > 0 ? m.spent_pence / pot.threshold_pence : 0;
-
-    if (m.status === 'broken') {
-      const over = m.spent_pence - pot.threshold_pence;
-      cards.push({
-        id: `broke-${m.id}`,
-        tone: 'lose',
-        emoji: '💥',
-        headline: `${m.display_name} went ${formatPence(over)} over`,
-        body: `${m.display_name} blew the ${pot.category} cap. ${formatPence(
-          pot.stake_pence
-        )} got redistributed to whoever held the line.`,
-      });
-    } else if (m.status === 'won') {
-      cards.push({
-        id: `won-${m.id}`,
-        tone: 'win',
-        emoji: '🏆',
-        headline: `${m.display_name} held the line and took the pot`,
-        body: `Discipline paid. ${m.display_name} now holds ${formatPence(m.stake_pence)}.`,
-      });
-    } else if (ratio >= 0.8) {
-      cards.push({
-        id: `warn-${m.id}`,
-        tone: 'warn',
-        emoji: '⚠️',
-        headline: `${who} ${formatPence(pot.stake_pence)} is on the line`,
-        body: `${whoSubject} ${Math.round(ratio * 100)}% through the ${pot.category} budget with ${daysLeft} ${
-          daysLeft === 1 ? 'day' : 'days'
-        } to go. One more slip breaks the bet.`,
-      });
-    }
-  }
-
-  if (cards.length === 0) {
-    cards.push({
-      id: 'all-good',
-      tone: 'info',
-      emoji: '🌤️',
-      headline: 'Everyone is comfortably holding',
-      body: `Plenty of headroom on the ${pot.category} budget. Keep checking in to build streaks.`,
-    });
-  }
-
-  return cards;
+interface Beat {
+  id: string;
+  lines: string[];
+  suggestion?: Suggestion;
 }
 
-const TONE: Record<CoachCard['tone'], { border: string; tint: string }> = {
-  warn: { border: 'rgba(255,210,74,0.4)', tint: colors.gold },
-  win: { border: 'rgba(200,255,0,0.4)', tint: colors.lime },
-  lose: { border: 'rgba(255,77,77,0.4)', tint: colors.red },
-  info: { border: colors.border, tint: colors.textDim },
+// The archetype-flavored second bucket the coach proposes.
+const SECOND: Record<ArchetypeKey, Suggestion> = {
+  vault: { name: 'House Deposit', emoji: '🏡', targetPence: 500000, color: colors.lime },
+  baller: { name: 'Fun Fund', emoji: '🍾', targetPence: 40000, color: colors.gold },
+  hustler: { name: 'Invest Pot', emoji: '📈', targetPence: 150000, color: colors.lime },
+  magpie: { name: 'Treat Budget', emoji: '✨', targetPence: 30000, color: colors.violet },
+  strategist: { name: 'Annual Bills', emoji: '🗂️', targetPence: 120000, color: '#5AC8FA' },
+  free_spirit: { name: 'Buffer', emoji: '🌊', targetPence: 50000, color: '#5AC8FA' },
 };
 
+function buildBeats(name: string, key: ArchetypeKey): Beat[] {
+  const a = getArchetype(key);
+  return [
+    {
+      id: 'intro',
+      lines: [
+        `Hey ${name} 👋`,
+        `You came out as ${a.emoji} ${a.title}. Let's set up a couple of buckets so your plan matches your money type.`,
+      ],
+    },
+    {
+      id: 'emergency',
+      lines: [
+        `As a ${a.title}, let's start with the safety net everyone needs.`,
+        `I'd ringfence an Emergency bucket first — set-and-forget peace of mind.`,
+      ],
+      suggestion: { name: 'Emergency fund', emoji: '🛟', targetPence: 200000, color: colors.lime },
+    },
+    {
+      id: 'second',
+      lines: [`Now something that fits you — ${a.signatureMove.toLowerCase()}`, `Here's one I'd line up next.`],
+      suggestion: SECOND[key],
+    },
+    {
+      id: 'done',
+      lines: [`That's a solid plan 🙌`, `Top these up whenever you sync. You can always add more.`],
+    },
+  ];
+}
+
 export default function Coach() {
+  const router = useRouter();
   const me = useIdentity();
-  const { pot, members } = usePot(DEMO.POT_ID);
-  const cards = pot ? buildCards(pot, members, me.id) : [];
+  const profile = useProfile();
+  const a = getArchetype(profile.archetype);
+  const beats = useMemo(() => buildBeats(me.display_name, profile.archetype), [me.display_name, profile.archetype]);
+
+  const [revealed, setRevealed] = useState(1);
+  const [accepted, setAccepted] = useState<Record<string, boolean>>({});
+  const scrollRef = useRef<ScrollView>(null);
+
+  const current = beats[revealed - 1];
+  const atEnd = revealed >= beats.length;
+
+  const advance = () => {
+    if (revealed < beats.length) {
+      setRevealed((r) => r + 1);
+      Haptics.selectionAsync().catch(() => {});
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 60);
+    }
+  };
+
+  const accept = (beat: Beat) => {
+    if (!beat.suggestion) return;
+    if (!hasBucket(beat.suggestion.name)) {
+      addBucket({
+        name: beat.suggestion.name,
+        emoji: beat.suggestion.emoji,
+        targetPence: beat.suggestion.targetPence,
+        currentPence: 0,
+        color: beat.suggestion.color,
+      });
+    }
+    setAccepted((s) => ({ ...s, [beat.id]: true }));
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    advance();
+  };
+
+  // What the bottom action offers depends on the current beat.
+  const needsDecision = !!current?.suggestion && !accepted[current.id];
 
   return (
     <Screen>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <Avatar emoji="🤖" size={44} ring="lime" />
           <View>
             <Text style={styles.title}>Coach</Text>
-            <Text style={styles.sub}>Reads the data. Never calls the winner.</Text>
+            <Text style={styles.sub}>Helps you build buckets — never calls the bet.</Text>
           </View>
         </View>
 
-        {cards.map((c, i) => (
-          <Animated.View key={c.id} entering={FadeInDown.delay(i * 90).springify().damping(16)}>
-            <View style={[styles.card, { borderColor: TONE[c.tone].border }]}>
-              <Text style={styles.cardEmoji}>{c.emoji}</Text>
-              <View style={{ flex: 1, gap: 4 }}>
-                <Text style={[styles.headline, { color: TONE[c.tone].tint }]}>{c.headline}</Text>
-                <Text style={styles.body}>{c.body}</Text>
+        {beats.slice(0, revealed).map((beat) => (
+          <Animated.View key={beat.id} entering={FadeInDown.springify().damping(16)} style={{ gap: 10 }}>
+            {beat.lines.map((line, i) => (
+              <View key={i} style={styles.bubble}>
+                <Text style={styles.bubbleText}>{line}</Text>
               </View>
-            </View>
+            ))}
+            {beat.suggestion && (
+              <View style={[styles.suggestion, accepted[beat.id] && styles.suggestionDone]}>
+                <Text style={styles.suggestionEmoji}>{beat.suggestion.emoji}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.suggestionName}>{beat.suggestion.name}</Text>
+                  <Text style={styles.suggestionTarget}>Target {formatPence(beat.suggestion.targetPence)}</Text>
+                </View>
+                {accepted[beat.id] && <Text style={styles.added}>✓ Added</Text>}
+              </View>
+            )}
           </Animated.View>
         ))}
 
-        <Card title="How the coach works">
-          <Text style={styles.note}>
-            Cards are rule-based and read live spending. An optional LLM summary can be wired through
-            a Supabase Edge Function (see supabase/functions/coach) so the API key never lives on the
-            device. The coach only comments — it never decides who wins or loses.
-          </Text>
-        </Card>
+        {/* Bottom action adapts to the conversation. */}
+        <Animated.View entering={FadeIn} style={styles.actions}>
+          {needsDecision ? (
+            <View style={styles.actionRow}>
+              <Button label={`Add ${current.suggestion!.name}`} onPress={() => accept(current)} style={{ flex: 1 }} />
+              <Button label="Skip" variant="ghost" onPress={advance} style={{ flex: 1 }} />
+            </View>
+          ) : atEnd ? (
+            <Button label="See my buckets →" onPress={() => router.push('/(tabs)/buckets')} />
+          ) : (
+            <Button label="Continue" variant="secondary" onPress={advance} />
+          )}
+        </Animated.View>
+
+        <Text style={styles.flavor}>
+          Tuned for {a.emoji} {a.title} · {a.tagline}
+        </Text>
+
+        <TabActions />
       </ScrollView>
     </Screen>
   );
@@ -129,16 +172,34 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', gap: 12, alignItems: 'center', marginBottom: 4 },
   title: { ...type.title, color: colors.text },
   sub: { ...type.caption, color: colors.textDim },
-  card: {
-    flexDirection: 'row',
-    gap: 14,
+  bubble: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
+    borderTopLeftRadius: 4,
     borderWidth: 1,
-    padding: 18,
+    borderColor: colors.border,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    alignSelf: 'flex-start',
+    maxWidth: '92%',
   },
-  cardEmoji: { fontSize: 28 },
-  headline: { ...type.h3 },
-  body: { ...type.body, color: colors.textDim, lineHeight: 21 },
-  note: { ...type.body, color: colors.textMute, lineHeight: 21 },
+  bubbleText: { ...type.body, color: colors.text, lineHeight: 21 },
+  suggestion: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.surfaceHi,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(200,255,0,0.3)',
+    padding: 14,
+  },
+  suggestionDone: { borderColor: colors.lime },
+  suggestionEmoji: { fontSize: 24 },
+  suggestionName: { ...type.h3, color: colors.text },
+  suggestionTarget: { ...type.caption, color: colors.textDim, marginTop: 2 },
+  added: { ...type.label, color: colors.lime },
+  actions: { marginTop: 4 },
+  actionRow: { flexDirection: 'row', gap: 10 },
+  flavor: { ...type.caption, color: colors.textMute, textAlign: 'center', marginTop: 4 },
 });

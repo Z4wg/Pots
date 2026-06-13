@@ -9,7 +9,6 @@ import { Button } from '@/components/Button';
 import { Avatar } from '@/components/Avatar';
 import { BetHealthBar } from '@/components/BetHealthBar';
 import { MoneyCounter } from '@/components/MoneyCounter';
-import { CheckInButton } from '@/components/CheckInButton';
 import { EventFeed } from '@/components/EventFeed';
 import { PayoutCoin, type CoinSpec } from '@/components/PayoutCoin';
 import { colors, radius, space, type } from '@/lib/theme';
@@ -19,7 +18,8 @@ import { usePot } from '@/hooks/usePotRealtime';
 import { useIdentity } from '@/hooks/useIdentity';
 import { useProfile } from '@/hooks/useProfile';
 import { getArchetype } from '@/lib/archetypes';
-import { recordTransaction, resolveWindowEnd, checkIn, simulateDay, resetDemo } from '@/lib/pots';
+import { recordTransaction, resolveWindowEnd, simulateDay, resetDemo, syncAccount } from '@/lib/pots';
+import { useLastSync, markSynced, relativeTime, isStale } from '@/lib/sync';
 import type { BetType, Pot, PotMember } from '@/lib/types';
 
 const COIN = 44;
@@ -41,6 +41,7 @@ export default function Home() {
   const profile = useProfile();
   const router = useRouter();
   const myArche = getArchetype(profile.archetype);
+  const lastSync = useLastSync(me.id);
 
   const [pots, setPots] = useState<Pot[]>([]);
   const [focusedId, setFocusedId] = useState<string>(DEMO.POT_ID);
@@ -103,6 +104,19 @@ export default function Home() {
   const daysLeft = pot
     ? Math.max(0, Math.ceil((new Date(pot.window_end).getTime() - Date.now()) / 86400000))
     : 0;
+
+  // §5: pull my standing from the connected bank (replaces "I held today").
+  const [syncing, setSyncing] = useState(false);
+  const onSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      await syncAccount(focusedId, me.id);
+      markSynced(me.id);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // Dev actions
   const onSimulate = () => simulateDay(focusedId);
@@ -195,10 +209,33 @@ export default function Home() {
           <Text style={styles.loading}>Loading the pot…</Text>
         )}
 
-        {/* Check in */}
+        {/* §5: account sync replaces self-reported check-in. */}
         {myMember && myMember.status === 'active' && (
-          <CheckInButton onCheckIn={() => checkIn(focusedId, me.id)} />
+          <View style={styles.syncCard}>
+            {isStale(lastSync) && (
+              <View style={styles.nudge}>
+                <Text style={styles.nudgeText}>⏳ You haven’t synced today — update your standing.</Text>
+              </View>
+            )}
+            <View style={styles.syncHead}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.syncTitle}>Sync your account</Text>
+                <Text style={styles.syncMeta}>Last synced {relativeTime(lastSync)} · from your bank</Text>
+              </View>
+            </View>
+            <Button
+              label={syncing ? 'Syncing…' : 'Sync now'}
+              onPress={onSync}
+              loading={syncing}
+            />
+          </View>
         )}
+
+        {/* Pod → Buckets shortcut (§7a). */}
+        <Pressable onPress={() => router.push('/(tabs)/buckets')} style={styles.bucketLink}>
+          <Text style={styles.bucketLinkText}>🪣 Plan your money in Buckets</Text>
+          <Text style={styles.bucketLinkArrow}>→</Text>
+        </Pressable>
 
         {/* Feed */}
         <Card title="Live feed" style={{ marginTop: space.sm }}>
@@ -347,6 +384,39 @@ const styles = StyleSheet.create({
   metaText: { ...type.caption, color: colors.textDim },
   board: { gap: 10, position: 'relative' },
   loading: { ...type.body, color: colors.textMute, textAlign: 'center', paddingVertical: space.lg },
+  syncCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: space.md,
+    gap: 12,
+  },
+  syncHead: { flexDirection: 'row', alignItems: 'center' },
+  syncTitle: { ...type.h3, color: colors.text },
+  syncMeta: { ...type.caption, color: colors.textDim, marginTop: 2 },
+  nudge: {
+    backgroundColor: 'rgba(255,210,74,0.12)',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255,210,74,0.4)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  nudgeText: { ...type.caption, color: colors.gold },
+  bucketLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.surfaceLo,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  bucketLinkText: { ...type.label, color: colors.text },
+  bucketLinkArrow: { ...type.h3, color: colors.lime },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

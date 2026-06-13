@@ -4,6 +4,18 @@ import { colors, radius, type } from '@/lib/theme';
 import { formatPence } from '@/lib/money';
 import type { PotEvent } from '@/lib/types';
 
+const CAT_LABEL: Record<string, string> = {
+  cafe: 'cafés',
+  going_out: 'going out',
+  grocery: 'groceries',
+  transport: 'transport',
+  savings: 'savings',
+};
+
+function catLabel(cat: string | undefined): string {
+  return (cat && CAT_LABEL[cat]) ?? cat ?? 'the bet';
+}
+
 function describe(e: PotEvent): { icon: string; text: string; tint: string } {
   const p = e.payload ?? {};
   switch (e.kind) {
@@ -15,10 +27,26 @@ function describe(e: PotEvent): { icon: string; text: string; tint: string } {
         text: `${e.actor_name} held the line${p.streak ? ` · streak ${p.streak}` : ''}`,
         tint: colors.lime,
       };
+    case 'sync':
+      // v2 §5/§6: feed events derive from the bet's metric.
+      return p.metric === 'spend'
+        ? {
+            icon: '🔄',
+            text: `${e.actor_name} synced · spent ${formatPence(p.amount ?? 0)} on ${catLabel(p.category)}`,
+            tint: colors.textDim,
+          }
+        : {
+            icon: '💪',
+            text: `${e.actor_name} synced · saved ${formatPence(p.amount ?? 0)} this week`,
+            tint: colors.lime,
+          };
     case 'spend':
+      // Only in-category spend reaches the feed (gated in recordTransaction).
       return {
         icon: '💳',
-        text: `${e.actor_name} spent ${formatPence(p.amount ?? 0)} at ${p.merchant ?? 'a shop'}`,
+        text: `${e.actor_name} spent ${formatPence(p.amount ?? 0)} on ${catLabel(p.category)}${
+          p.merchant ? ` (${p.merchant})` : ''
+        }`,
         tint: colors.textDim,
       };
     case 'broke':
