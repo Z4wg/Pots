@@ -17,7 +17,7 @@ import Animated, {
 
 import { Screen } from '@/components/Screen';
 import { ResultCard } from '@/components/ResultCard';
-import { colors, radius, space, type } from '@/lib/theme';
+import { colors, radius, shadow, space, type } from '@/lib/theme';
 import { QUIZ, scoreQuiz, type ArchetypeKey, type QuizQuestion } from '@/lib/archetypes';
 import { setArchetype } from '@/hooks/useProfile';
 
@@ -71,14 +71,24 @@ export default function Onboarding() {
 
         {/* §2 — the card + its two answers are one tight unit, centered. */}
         <View style={styles.cardArea}>
-          <SwipeCard key={q.id} question={q} onPick={pick} />
+          <SwipeCard key={q.id} question={q} index={index} total={QUIZ.length} onPick={pick} />
         </View>
       </View>
     </Screen>
   );
 }
 
-function SwipeCard({ question, onPick }: { question: QuizQuestion; onPick: (tag: ArchetypeKey) => void }) {
+function SwipeCard({
+  question,
+  index,
+  total,
+  onPick,
+}: {
+  question: QuizQuestion;
+  index: number;
+  total: number;
+  onPick: (tag: ArchetypeKey) => void;
+}) {
   const tx = useSharedValue(0);
   const picked = useRef(false);
   const [left, right] = question.options;
@@ -160,6 +170,7 @@ function SwipeCard({ question, onPick }: { question: QuizQuestion; onPick: (tag:
 
   return (
     <View style={styles.unit}>
+      {/* The question — an elevated prompt card, visually distinct from the answers. */}
       <GestureDetector gesture={pan}>
         <Animated.View style={[styles.card, cardStyle]} entering={FadeIn.duration(220)}>
           <Animated.Text style={[styles.edge, styles.edgeLeft, leftHint]} numberOfLines={2}>
@@ -168,14 +179,28 @@ function SwipeCard({ question, onPick }: { question: QuizQuestion; onPick: (tag:
           <Animated.Text style={[styles.edge, styles.edgeRight, rightHint]} numberOfLines={2}>
             {right.label} ▶
           </Animated.Text>
+          <Text style={styles.kicker}>QUESTION {index + 1} OF {total}</Text>
           <Text style={styles.prompt}>{question.prompt}</Text>
-          <Text style={styles.swipeHint}>Swipe or tap</Text>
+          <Text style={styles.swipeHint}>← swipe the card, or tap below →</Text>
         </Animated.View>
       </GestureDetector>
 
+      {/* The two answers — clearly the swipe choices, with direction arrows. */}
       <View style={styles.answers}>
-        <AnswerButton style={leftBtnStyle} labelStyle={leftLabelStyle} label={left.label} onPress={() => fly(-1, left.tag)} />
-        <AnswerButton style={rightBtnStyle} labelStyle={rightLabelStyle} label={right.label} onPress={() => fly(1, right.tag)} />
+        <AnswerButton
+          arrow="←"
+          style={leftBtnStyle}
+          labelStyle={leftLabelStyle}
+          label={left.label}
+          onPress={() => fly(-1, left.tag)}
+        />
+        <AnswerButton
+          arrow="→"
+          style={rightBtnStyle}
+          labelStyle={rightLabelStyle}
+          label={right.label}
+          onPress={() => fly(1, right.tag)}
+        />
       </View>
     </View>
   );
@@ -183,11 +208,13 @@ function SwipeCard({ question, onPick }: { question: QuizQuestion; onPick: (tag:
 
 function AnswerButton({
   label,
+  arrow,
   onPress,
   style,
   labelStyle,
 }: {
   label: string;
+  arrow: string;
   onPress: () => void;
   style: any;
   labelStyle: any;
@@ -195,6 +222,7 @@ function AnswerButton({
   return (
     <Pressable style={styles.answerWrap} onPress={onPress}>
       <Animated.View style={[styles.answer, style]}>
+        <Animated.Text style={[styles.answerArrow, labelStyle]}>{arrow}</Animated.Text>
         <Animated.Text style={[styles.answerText, labelStyle]}>{label}</Animated.Text>
       </Animated.View>
     </Pressable>
@@ -211,26 +239,29 @@ const styles = StyleSheet.create({
   dot: { width: 26, height: 5, borderRadius: 3, backgroundColor: colors.border },
   dotOn: { backgroundColor: colors.lime },
 
-  // Card + the two answers, grouped tight (§2.3).
-  unit: { gap: 14 },
+  // Card + the two answers, grouped tight (§2.3). The card is elevated + lighter
+  // with a kicker so it reads as the QUESTION, not a third tappable option.
+  unit: { gap: 16 },
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceHi,
     borderRadius: radius.xl,
     borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: 44,
+    borderColor: 'rgba(200,255,0,0.18)',
+    paddingVertical: 40,
     paddingHorizontal: 24,
-    minHeight: 200,
+    minHeight: 190,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 14,
+    gap: 12,
     overflow: 'hidden',
+    ...shadow.card,
   },
+  kicker: { ...type.micro, color: colors.lime, letterSpacing: 1.6 },
   edge: { position: 'absolute', top: 16, ...type.micro, color: colors.lime, maxWidth: 110 },
   edgeLeft: { left: 14, textAlign: 'left' },
   edgeRight: { right: 14, textAlign: 'right' },
   prompt: { ...type.h2, fontSize: 26, color: colors.text, textAlign: 'center', lineHeight: 32 },
-  swipeHint: { ...type.micro, color: colors.textMute, letterSpacing: 1 },
+  swipeHint: { ...type.micro, color: colors.textMute, letterSpacing: 0.6, marginTop: 2 },
 
   answers: { flexDirection: 'row', gap: 12 },
   answerWrap: { flex: 1 },
@@ -238,12 +269,14 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: 1.5,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
-    paddingVertical: 22,
-    paddingHorizontal: 14,
-    minHeight: 78,
+    backgroundColor: colors.surfaceLo,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    minHeight: 84,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 4,
   },
+  answerArrow: { ...type.h2, color: colors.lime, lineHeight: 24 },
   answerText: { ...type.h3, color: colors.text, textAlign: 'center' },
 });

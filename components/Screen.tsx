@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View, ViewStyle } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { colors, radius, type } from '@/lib/theme';
@@ -17,6 +17,7 @@ interface Props {
 }
 
 export function Screen({ children, style, glow = 'lime', onClose, closeLabel }: Props) {
+  const insets = useSafeAreaInsets();
   return (
     <View style={styles.root}>
       {glow !== 'none' && (
@@ -31,23 +32,25 @@ export function Screen({ children, style, glow = 'lime', onClose, closeLabel }: 
         />
       )}
       <SafeAreaView style={[styles.safe, style]} edges={['top', 'left', 'right']}>
-        {onClose && (
-          <Pressable
-            onPress={() => {
-              Haptics.selectionAsync().catch(() => {});
-              onClose();
-            }}
-            hitSlop={14}
-            style={({ pressed }) => [
-              styles.close,
-              closeLabel ? styles.closePill : styles.closeRound,
-              pressed && { opacity: 0.6 },
-            ]}>
-            <Text style={styles.closeText}>{closeLabel ?? '✕'}</Text>
-          </Pressable>
-        )}
         {children}
       </SafeAreaView>
+      {/* Anchored below the notch via the real inset so it's always tappable. */}
+      {onClose && (
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync().catch(() => {});
+            onClose();
+          }}
+          hitSlop={16}
+          style={({ pressed }) => [
+            styles.close,
+            { top: insets.top + 8 },
+            closeLabel ? styles.closePill : styles.closeRound,
+            pressed && { opacity: 0.6 },
+          ]}>
+          <Text style={styles.closeText}>{closeLabel ?? '✕'}</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -58,7 +61,6 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   close: {
     position: 'absolute',
-    top: 6,
     right: 16,
     zIndex: 20,
     alignItems: 'center',
@@ -67,7 +69,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  closeRound: { width: 36, height: 36, borderRadius: 18 },
-  closePill: { paddingHorizontal: 16, height: 36, borderRadius: radius.pill },
-  closeText: { ...type.label, color: colors.textDim },
+  closeRound: { width: 38, height: 38, borderRadius: 19 },
+  closePill: { paddingHorizontal: 18, height: 38, borderRadius: radius.pill },
+  closeText: { ...type.label, color: colors.text },
 });
