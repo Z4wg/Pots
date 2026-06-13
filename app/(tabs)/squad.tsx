@@ -1,4 +1,5 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 
 import { Screen } from '@/components/Screen';
@@ -35,6 +36,7 @@ function ordinal(n: number): string {
 
 export default function Squad() {
   const me = useIdentity();
+  const router = useRouter();
   const { pot, members } = usePot(DEMO.POT_ID);
 
   const lowerBetter = pot?.bet_type === 'spend_freeze';
@@ -114,6 +116,12 @@ export default function Squad() {
             />
           </View>
           <Text style={styles.toggleHint}>Phone A = Maya · Phone B = Tom</Text>
+          <Button
+            label="↺ Replay intro (swipe quiz)"
+            variant="ghost"
+            small
+            onPress={() => router.push('/onboarding')}
+          />
         </Card>
 
         <View style={styles.list}>
