@@ -14,6 +14,15 @@ function genInviteCode() {
   return 'POTS' + Math.random().toString(36).slice(2, 6).toUpperCase();
 }
 
+// Each realtime subscription needs its OWN channel topic. Multiple screens
+// (every tab calls usePot for the same pot) subscribe concurrently, and
+// supabase-js reuses a channel by topic name — calling `.on()` on an
+// already-subscribed channel throws
+// ("cannot add postgres_changes callbacks ... after subscribe()"), which
+// crashes whichever tab mounts second. A per-subscription suffix keeps each
+// screen's channel distinct.
+let channelSeq = 0;
+
 export class SupabaseBackend implements Backend {
   readonly isMock = false;
 
@@ -254,7 +263,7 @@ export class SupabaseBackend implements Backend {
 
   subscribe(potId: string, handlers: RealtimeHandlers): () => void {
     const channel = supabase
-      .channel(`pot-${potId}`)
+      .channel(`pot-${potId}-${++channelSeq}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'pot_members', filter: `pot_id=eq.${potId}` },
