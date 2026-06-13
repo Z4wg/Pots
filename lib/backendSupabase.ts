@@ -1,7 +1,18 @@
 import { supabase } from './supabase';
 import type { Backend, RealtimeHandlers } from './backend';
-import type { Pot, PotMember, PotEvent, Transaction } from './types';
-import { seedUsers, seedPot, seedMembers, seedEvents } from './seedData';
+import type {
+  BankConnection,
+  NewPotInput,
+  Pot,
+  PotMember,
+  PotEvent,
+  Transaction,
+} from './types';
+import { seedUsers, seedPot, seedMembers, seedEvents, seedBankConnections } from './seedData';
+
+function genInviteCode() {
+  return 'POTS' + Math.random().toString(36).slice(2, 6).toUpperCase();
+}
 
 export class SupabaseBackend implements Backend {
   readonly isMock = false;
@@ -77,6 +88,145 @@ export class SupabaseBackend implements Backend {
     await supabase.from('pots').update({ pot_total_pence: totalPence }).eq('id', potId);
   }
 
+  async getPotsForUser(userId: string): Promise<Pot[]> {
+    const { data: mem, error: e1 } = await supabase
+      .from('pot_members')
+      .select('pot_id')
+      .eq('user_id', userId);
+    if (e1) throw e1;
+    const ids = (mem ?? []).map((r: any) => r.pot_id);
+    if (!ids.length) return [];
+    const { data, error } = await supabase.from('pots').select('*').in('id', ids);
+    if (error) throw error;
+    return (data ?? []) as Pot[];
+  }
+
+  async getPotByInviteCode(code: string): Promise<Pot | null> {
+    const { data, error } = await supabase
+      .from('pots')
+      .select('*')
+      .eq('invite_code', code)
+      .maybeSingle();
+    if (error) throw error;
+    return (data as Pot) ?? null;
+  }
+
+  async getBankConnection(userId: string): Promise<BankConnection | null> {
+    const { data, error } = await supabase
+      .from('bank_connections')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) throw error;
+    return (data as BankConnection) ?? null;
+  }
+
+  async upsertBankConnection(conn: BankConnection): Promise<void> {
+    const { error } = await supabase
+      .from('bank_connections')
+      .upsert(conn, { onConflict: 'user_id' });
+    if (error) throw error;
+  }
+
+  async createPot(input: NewPotInput, creatorUserId: string): Promise<Pot> {
+    const { data, error } = await supabase
+      .from('pots')
+      .insert({
+        name: input.name,
+        goal_label: input.goal_label,
+        category: input.category,
+        comparator: input.comparator,
+        threshold_pence: input.threshold_pence,
+        window_end: input.window_end,
+        stake_pence: input.stake_pence,
+        pot_total_pence: input.stake_pence,
+        invite_code: genInviteCode(),
+        bet_type: input.bet_type,
+        payout_rule: input.payout_rule,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    const pot = data as Pot;
+
+    const { error: e2 } = await supabase.from('pot_members').insert({
+      pot_id: pot.id,
+      user_id: creatorUserId,
+      stake_pence: input.stake_pence,
+      spent_pence: 0,
+      current_streak: 0,
+      status: 'active',
+      personal_goal_pence: input.personal_goal_pence,
+      current_value_pence: 0,
+      stake_paid: true,
+    });
+    if (e2) throw e2;
+
+    await supabase.from('events').insert({
+      pot_id: pot.id,
+      kind: 'join',
+      actor_name: await this.getUserName(creatorUserId),
+      payload: {},
+    });
+    return pot;
+  }
+
+  async joinPot(potId: string, userId: string): Promise<void> {
+    const { data: existing } = await supabase
+      .from('pot_members')
+      .select('id')
+      .eq('pot_id', potId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (existing) return;
+
+    const pot = await this.getPot(potId);
+    const { error } = await supabase.from('pot_members').insert({
+      pot_id: potId,
+      user_id: userId,
+      stake_pence: pot.stake_pence,
+      spent_pence: 0,
+      current_streak: 0,
+      status: 'active',
+      personal_goal_pence: pot.threshold_pence,
+      current_value_pence: 0,
+      stake_paid: false,
+    });
+    if (error) throw error;
+
+    await supabase.from('events').insert({
+      pot_id: potId,
+      kind: 'join',
+      actor_name: await this.getUserName(userId),
+      payload: {},
+    });
+  }
+
+  async payStake(potId: string, userId: string): Promise<void> {
+    await supabase
+      .from('pot_members')
+      .update({ stake_paid: true })
+      .eq('pot_id', potId)
+      .eq('user_id', userId);
+
+    const { data: mems } = await supabase
+      .from('pot_members')
+      .select('stake_pence, stake_paid, user_id')
+      .eq('pot_id', potId);
+    const total = (mems ?? [])
+      .filter((m: any) => m.stake_paid)
+      .reduce((s: number, m: any) => s + m.stake_pence, 0);
+    await supabase.from('pots').update({ pot_total_pence: total }).eq('id', potId);
+
+    const mine = (mems ?? []).find((m: any) => m.user_id === userId);
+    await supabase.from('events').insert({
+      pot_id: potId,
+      kind: 'paid',
+      actor_name: await this.getUserName(userId),
+      payload: { amount: mine?.stake_pence ?? 0 },
+    });
+  }
+
   async resetDemo(): Promise<void> {
     const pot = seedPot();
     const users = seedUsers();
@@ -96,6 +246,10 @@ export class SupabaseBackend implements Backend {
     await supabase.from('events').insert(
       events.map(({ id, created_at, ...e }) => e)
     );
+
+    await supabase
+      .from('bank_connections')
+      .upsert(seedBankConnections(), { onConflict: 'user_id' });
   }
 
   subscribe(potId: string, handlers: RealtimeHandlers): () => void {

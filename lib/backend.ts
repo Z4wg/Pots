@@ -1,4 +1,4 @@
-import type { Pot, PotMember, PotEvent, Transaction } from './types';
+import type { BankConnection, NewPotInput, Pot, PotMember, PotEvent, Transaction } from './types';
 import { SUPABASE_CONFIGURED } from './supabase';
 import { SupabaseBackend } from './backendSupabase';
 import { MockBackend } from './backendMock';
@@ -21,6 +21,14 @@ export interface Backend {
   getEvents(potId: string, limit?: number): Promise<PotEvent[]>;
   getUserName(userId: string): Promise<string>;
   updatePotTotal(potId: string, totalPence: number): Promise<void>;
+  // v2
+  getPotsForUser(userId: string): Promise<Pot[]>;
+  getPotByInviteCode(code: string): Promise<Pot | null>;
+  createPot(input: NewPotInput, creatorUserId: string): Promise<Pot>;
+  joinPot(potId: string, userId: string): Promise<void>;
+  payStake(potId: string, userId: string): Promise<void>;
+  getBankConnection(userId: string): Promise<BankConnection | null>;
+  upsertBankConnection(conn: BankConnection): Promise<void>;
   resetDemo(): Promise<void>;
   subscribe(potId: string, handlers: RealtimeHandlers): () => void;
 }

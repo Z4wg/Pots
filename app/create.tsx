@@ -1,115 +1,261 @@
 import { useEffect, useState } from 'react';
-import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import * as Linking from 'expo-linking';
 import * as Haptics from 'expo-haptics';
-import Animated, {
-  Easing,
-  FadeIn,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { Screen } from '@/components/Screen';
 import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
-import { Avatar } from '@/components/Avatar';
 import { colors, radius, space, type } from '@/lib/theme';
 import { formatPence } from '@/lib/money';
 import { getArchetype } from '@/lib/archetypes';
-import { DEMO } from '@/lib/demo';
-import { useProfile, setStakePence, completeOnboarding } from '@/hooks/useProfile';
+import { getProvider } from '@/lib/bankSeed';
+import { backend } from '@/lib/backend';
+import { useIdentity } from '@/hooks/useIdentity';
+import { useProfile } from '@/hooks/useProfile';
+import type { BankConnection, BetType, Comparator, NewPotInput, PayoutRule } from '@/lib/types';
+
+const BET_TYPES: { key: BetType; label: string; desc: string }[] = [
+  { key: 'spend_freeze', label: 'Spend Freeze', desc: 'Lowest spend in a category wins.' },
+  { key: 'save_race', label: 'Save Race', desc: 'Grow your savings the most.' },
+  { key: 'target_commit', label: 'Target Commit', desc: 'First to hit your own target.' },
+];
+
+const CATS: { key: string; label: string }[] = [
+  { key: 'cafe', label: 'Cafés' },
+  { key: 'going_out', label: 'Going out' },
+  { key: 'grocery', label: 'Groceries' },
+  { key: 'transport', label: 'Transport' },
+];
+
+const PAYOUTS: { key: PayoutRule; label: string }[] = [
+  { key: 'winner_takes_all', label: 'Winner takes all' },
+  { key: 'split_winners', label: 'Split among everyone who hits their goal' },
+  { key: 'loser_buys', label: 'Loser buys dinner (no money moves)' },
+];
+
+const GOAL_DEFAULTS: Record<BetType, number> = {
+  spend_freeze: 8000,
+  save_race: 20000,
+  target_commit: 20000,
+};
 
 export default function Create() {
   const router = useRouter();
+  const me = useIdentity();
   const profile = useProfile();
   const a = getArchetype(profile.archetype);
+
+  const [name, setName] = useState('No-Takeout Challenge');
+  const [betType, setBetType] = useState<BetType>('spend_freeze');
+  const [category, setCategory] = useState<string>(a.betCategory === 'savings' ? 'cafe' : a.betCategory);
+  const [days, setDays] = useState(30);
   const [stake, setStake] = useState(profile.stakePence);
-  const [connecting, setConnecting] = useState(false);
-  const [connected, setConnected] = useState(false);
+  const [goal, setGoal] = useState(GOAL_DEFAULTS.spend_freeze);
+  const [payout, setPayout] = useState<PayoutRule>('winner_takes_all');
+  const [stakePaid, setStakePaid] = useState(false);
+  const [connection, setConnection] = useState<BankConnection | null>(null);
+  const [creating, setCreating] = useState(false);
 
-  const bump = (delta: number) => {
-    const next = Math.max(100, stake + delta);
-    setStake(next);
-    setStakePence(next);
+  useEffect(() => {
+    let alive = true;
+    backend.getBankConnection(me.id).then((c) => alive && setConnection(c));
+    return () => {
+      alive = false;
+    };
+  }, [me.id]);
+
+  const chooseBetType = (key: BetType) => {
     Haptics.selectionAsync().catch(() => {});
+    setBetType(key);
+    setGoal(GOAL_DEFAULTS[key]);
   };
 
-  const invite = () => {
-    const url = Linking.createURL('/join/' + DEMO.INVITE_CODE);
-    Share.share({
-      message: `Join my Pots bet "${a.betGoalLabel}". Tap to join: ${url}`,
-    }).catch(() => {});
+  const bump = (set: (n: number) => void, val: number, delta: number, min = 100) =>
+    () => {
+      set(Math.max(min, val + delta));
+      Haptics.selectionAsync().catch(() => {});
+    };
+
+  const pay = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    setStakePaid(true);
   };
 
-  const connectRevolut = () => {
-    setConnecting(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    // Faked: pretend to pull seeded transactions from the bank.
-    setTimeout(() => {
-      setConnecting(false);
-      setConnected(true);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    }, 1800);
-  };
+  const isFreeze = betType === 'spend_freeze';
+  const catLabel = CATS.find((c) => c.key === category)?.label ?? category;
+  const goalLabel = isFreeze
+    ? `Spend under ${formatPence(goal)} on ${catLabel.toLowerCase()}`
+    : betType === 'save_race'
+    ? `Grow savings the most (target ${formatPence(goal)})`
+    : `First to hit your ${formatPence(goal)} target`;
 
-  const go = () => {
-    completeOnboarding();
-    router.replace('/(tabs)');
+  const canCreate = !!connection && stakePaid && name.trim().length > 0 && !creating;
+
+  const create = async () => {
+    if (!canCreate) return;
+    setCreating(true);
+    const comparator: Comparator = isFreeze ? 'under' : 'atleast';
+    const input: NewPotInput = {
+      name: name.trim(),
+      goal_label: goalLabel,
+      bet_type: betType,
+      category: isFreeze ? category : 'savings',
+      comparator,
+      threshold_pence: goal,
+      window_end: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString(),
+      stake_pence: stake,
+      payout_rule: payout,
+      personal_goal_pence: goal,
+    };
+    try {
+      const pot = await backend.createPot(input, me.id);
+      router.push(`/invite/${pot.id}`);
+    } finally {
+      setCreating(false);
+    }
   };
 
   return (
     <Screen>
-      <View style={styles.wrap}>
-        <Text style={styles.title}>Set your bet</Text>
-        <Text style={styles.sub}>Auto-suggested for {a.title}. Adjust if you like.</Text>
+      <ScrollView contentContainerStyle={styles.wrap} showsVerticalScrollIndicator={false}>
+        <Text style={styles.title}>Start a POT</Text>
+        <Text style={styles.sub}>Set the bet. Your friends hold you to it.</Text>
 
-        <Card accent>
-          <View style={styles.betHead}>
-            <Avatar emoji={a.emoji} size={44} ring="lime" />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.betLabel}>{a.betGoalLabel}</Text>
-              <Text style={styles.betMeta}>Resolved automatically by your spending.</Text>
-            </View>
+        <Card title="Pot name">
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            placeholder="Name your pot"
+            placeholderTextColor={colors.textMute}
+            style={styles.input}
+          />
+        </Card>
+
+        <Card title="Bet type">
+          <View style={styles.betTypes}>
+            {BET_TYPES.map((b) => (
+              <Pressable
+                key={b.key}
+                onPress={() => chooseBetType(b.key)}
+                style={[styles.betType, betType === b.key && styles.betTypeOn]}>
+                <Text style={[styles.betTypeLabel, betType === b.key && { color: colors.lime }]}>
+                  {b.label}
+                </Text>
+                <Text style={styles.betTypeDesc}>{b.desc}</Text>
+              </Pressable>
+            ))}
           </View>
         </Card>
 
-        <Card title="Your stake">
-          <View style={styles.stakeRow}>
-            <Stepper label="–" onPress={() => bump(-100)} />
-            <View style={styles.stakeMid}>
-              <Text style={styles.stakeValue}>{formatPence(stake)}</Text>
-              <Text style={styles.stakeHint}>at risk if you break it</Text>
+        {isFreeze && (
+          <Card title="Category">
+            <View style={styles.chips}>
+              {CATS.map((c) => (
+                <Pressable
+                  key={c.key}
+                  onPress={() => {
+                    setCategory(c.key);
+                    Haptics.selectionAsync().catch(() => {});
+                  }}
+                  style={[styles.chip, category === c.key && styles.chipOn]}>
+                  <Text style={[styles.chipText, category === c.key && { color: colors.black }]}>
+                    {c.label}
+                  </Text>
+                </Pressable>
+              ))}
             </View>
-            <Stepper label="+" onPress={() => bump(100)} />
+          </Card>
+        )}
+
+        <Card title={isFreeze ? 'Your cap' : 'Your target'}>
+          <View style={styles.stepRow}>
+            <Stepper label="–" onPress={bump(setGoal, goal, -500, 500)} />
+            <View style={styles.stepMid}>
+              <Text style={styles.stepValue}>{formatPence(goal)}</Text>
+              <Text style={styles.stepHint}>{goalLabel}</Text>
+            </View>
+            <Stepper label="+" onPress={bump(setGoal, goal, 500, 500)} />
           </View>
         </Card>
 
-        <Card title="Squad">
-          <Button label="Invite a friend" variant="secondary" onPress={invite} />
-          <Text style={styles.inviteHint}>Generates a deep link to /join/{DEMO.INVITE_CODE}</Text>
+        <Card title="Duration">
+          <View style={styles.chips}>
+            {[7, 30, 90].map((d) => (
+              <Pressable
+                key={d}
+                onPress={() => {
+                  setDays(d);
+                  Haptics.selectionAsync().catch(() => {});
+                }}
+                style={[styles.chip, days === d && styles.chipOn]}>
+                <Text style={[styles.chipText, days === d && { color: colors.black }]}>{d} days</Text>
+              </Pressable>
+            ))}
+          </View>
         </Card>
 
-        <Card title="Connect your bank">
-          {connected ? (
-            <Animated.View entering={FadeIn} style={styles.connectedRow}>
-              <Text style={styles.connectedDot}>●</Text>
-              <Text style={styles.connectedText}>Revolut connected · demo transactions loaded</Text>
+        <Card title="Stake (per person)">
+          <View style={styles.stepRow}>
+            <Stepper label="–" onPress={bump(setStake, stake, -100)} />
+            <View style={styles.stepMid}>
+              <Text style={styles.stepValue}>{formatPence(stake)}</Text>
+              <Text style={styles.stepHint}>into the pot</Text>
+            </View>
+            <Stepper label="+" onPress={bump(setStake, stake, 100)} />
+          </View>
+          {stakePaid ? (
+            <Animated.View entering={FadeIn} style={styles.paidRow}>
+              <Text style={styles.paidText}>✓ Paid {formatPence(stake)}</Text>
             </Animated.View>
-          ) : connecting ? (
-            <ConnectingAnim />
           ) : (
-            <Button label="Connect Revolut" variant="secondary" onPress={connectRevolut} />
+            <Button label={`Pay ${formatPence(stake)} stake`} variant="secondary" onPress={pay} />
           )}
-          <Text style={styles.inviteHint}>Demo only — no real bank data is used.</Text>
         </Card>
 
-        <View style={{ flex: 1 }} />
-        <Button label="Enter the pot →" onPress={go} disabled={!connected} />
-        {!connected && <Text style={styles.lockHint}>Connect your bank to continue</Text>}
-      </View>
+        <Card title="Payout rule">
+          <View style={{ gap: 8 }}>
+            {PAYOUTS.map((p) => (
+              <Pressable
+                key={p.key}
+                onPress={() => {
+                  setPayout(p.key);
+                  Haptics.selectionAsync().catch(() => {});
+                }}
+                style={styles.radioRow}>
+                <View style={[styles.radio, payout === p.key && styles.radioOn]}>
+                  {payout === p.key && <View style={styles.radioDot} />}
+                </View>
+                <Text style={styles.radioLabel}>{p.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </Card>
+
+        {!connection && (
+          <Card title="Connect your bank">
+            <Button label="Connect your bank" variant="secondary" onPress={() => router.push('/connect')} />
+            <Text style={styles.hint}>Required — the bank tracks the bet.</Text>
+          </Card>
+        )}
+        {connection && (
+          <Text style={styles.connHint}>
+            ● {getProvider(connection.provider).name} connected · {formatPence(connection.balance_pence)}
+          </Text>
+        )}
+
+        <Button
+          label={creating ? 'Creating…' : 'Create pot →'}
+          onPress={create}
+          disabled={!canCreate}
+        />
+        {!canCreate && !creating && (
+          <Text style={styles.lockHint}>
+            {!connection ? 'Connect your bank' : !stakePaid ? 'Pay your stake to continue' : 'Name your pot'}
+          </Text>
+        )}
+      </ScrollView>
     </Screen>
   );
 }
@@ -122,34 +268,41 @@ function Stepper({ label, onPress }: { label: string; onPress: () => void }) {
   );
 }
 
-function ConnectingAnim() {
-  const rot = useSharedValue(0);
-  useEffect(() => {
-    rot.value = withRepeat(withTiming(1, { duration: 900, easing: Easing.linear }), -1);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const style = useAnimatedStyle(() => ({ transform: [{ rotate: `${rot.value * 360}deg` }] }));
-  return (
-    <View style={styles.connectingRow}>
-      <Animated.View style={[styles.spinner, style]} />
-      <Text style={styles.connectingText}>Securely connecting to Revolut…</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  wrap: { flex: 1, padding: space.lg, gap: space.md },
+  wrap: { padding: space.lg, gap: space.md, paddingBottom: space.xxl },
   title: { ...type.title, color: colors.text },
   sub: { ...type.body, color: colors.textDim, marginTop: -6 },
-  betHead: { flexDirection: 'row', gap: 12, alignItems: 'center' },
-  betLabel: { ...type.h3, color: colors.text },
-  betMeta: { ...type.caption, color: colors.textDim, marginTop: 2 },
-  stakeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  stakeMid: { alignItems: 'center', gap: 2 },
-  stakeValue: { ...type.hero, fontSize: 44, color: colors.lime },
-  stakeHint: { ...type.caption, color: colors.textMute },
+  input: { ...type.h3, color: colors.text, paddingVertical: 4 },
+  betTypes: { gap: 10 },
+  betType: {
+    backgroundColor: colors.surfaceLo,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 14,
+    gap: 2,
+  },
+  betTypeOn: { borderColor: colors.lime, backgroundColor: colors.surfaceHi },
+  betTypeLabel: { ...type.h3, color: colors.text },
+  betTypeDesc: { ...type.caption, color: colors.textDim },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceLo,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  chipOn: { backgroundColor: colors.lime, borderColor: colors.lime },
+  chipText: { ...type.label, color: colors.text },
+  stepRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  stepMid: { alignItems: 'center', gap: 2, flex: 1 },
+  stepValue: { ...type.hero, fontSize: 40, color: colors.lime },
+  stepHint: { ...type.caption, color: colors.textMute, textAlign: 'center' },
   stepper: {
-    width: 56,
-    height: 56,
+    width: 52,
+    height: 52,
     borderRadius: radius.md,
     backgroundColor: colors.surfaceHi,
     borderWidth: 1,
@@ -158,19 +311,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   stepperText: { ...type.title, color: colors.text },
-  inviteHint: { ...type.caption, color: colors.textMute },
-  connectingRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
-  spinner: {
+  paidRow: { alignItems: 'center', paddingVertical: 8 },
+  paidText: { ...type.h3, color: colors.lime },
+  radioRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  radio: {
     width: 22,
     height: 22,
     borderRadius: 11,
-    borderWidth: 3,
-    borderColor: colors.lime,
-    borderTopColor: 'transparent',
+    borderWidth: 2,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  connectingText: { ...type.body, color: colors.textDim },
-  connectedRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  connectedDot: { color: colors.lime, fontSize: 12 },
-  connectedText: { ...type.body, color: colors.text },
+  radioOn: { borderColor: colors.lime },
+  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.lime },
+  radioLabel: { ...type.body, color: colors.text, flex: 1 },
+  hint: { ...type.caption, color: colors.textMute },
+  connHint: { ...type.caption, color: colors.lime, textAlign: 'center' },
   lockHint: { ...type.caption, color: colors.textMute, textAlign: 'center' },
 });

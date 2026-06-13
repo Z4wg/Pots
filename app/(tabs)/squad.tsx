@@ -17,10 +17,10 @@ import type { MemberStatus, PotMember } from '@/lib/types';
 
 // Extra seeded friends so the squad looks alive (display-only, not in the bet).
 const EXTRA_FRIENDS: { name: string; emoji: string; archetype: string; stake: number; streak: number; status: MemberStatus }[] = [
-  { name: 'Priya', emoji: '🐿️', archetype: 'saver', stake: 500, streak: 7, status: 'active' },
+  { name: 'Priya', emoji: '🐿️', archetype: 'vault', stake: 500, streak: 7, status: 'active' },
   { name: 'Leo', emoji: '🚀', archetype: 'hustler', stake: 500, streak: 5, status: 'active' },
-  { name: 'Zoe', emoji: '💎', archetype: 'status_spender', stake: 0, streak: 0, status: 'broken' },
-  { name: 'Sam', emoji: '🌱', archetype: 'soft_saver', stake: 500, streak: 2, status: 'active' },
+  { name: 'Zoe', emoji: '💎', archetype: 'magpie', stake: 0, streak: 0, status: 'broken' },
+  { name: 'Sam', emoji: '🌱', archetype: 'free_spirit', stake: 500, streak: 2, status: 'active' },
 ];
 
 interface Row {

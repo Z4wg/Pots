@@ -35,6 +35,24 @@ function describe(e: PotEvent): { icon: string; text: string; tint: string } {
       };
     case 'won':
       return { icon: '🏆', text: `${e.actor_name} held the line and won`, tint: colors.lime };
+    case 'paid':
+      return {
+        icon: '💰',
+        text: `${e.actor_name} paid ${formatPence(p.amount ?? 0)} into the pot`,
+        tint: colors.lime,
+      };
+    case 'milestone':
+      return {
+        icon: '📈',
+        text: `${e.actor_name} saved ${formatPence(p.saved ?? 0)}${
+          p.total ? ` · ${formatPence(p.total)} total` : ''
+        }`,
+        tint: colors.lime,
+      };
+    case 'rank_up':
+      return { icon: '🔼', text: `${e.actor_name} climbed to #${p.rank ?? '?'}`, tint: colors.lime };
+    case 'rank_down':
+      return { icon: '🔽', text: `${e.actor_name} slipped to #${p.rank ?? '?'}`, tint: colors.red };
     default:
       return { icon: '•', text: e.kind, tint: colors.textDim };
   }

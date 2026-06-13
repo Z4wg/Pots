@@ -25,14 +25,14 @@ export interface DemoUser {
 export const MAYA: DemoUser = {
   id: DEMO.MAYA_ID,
   display_name: 'Maya',
-  archetype: 'traveller',
+  archetype: 'vault', // disciplined holder
   avatar_emoji: '🦊',
 };
 
 export const TOM: DemoUser = {
   id: DEMO.TOM_ID,
   display_name: 'Tom',
-  archetype: 'socialiser',
+  archetype: 'baller', // fun, first to slip
   avatar_emoji: '🐢',
 };
 

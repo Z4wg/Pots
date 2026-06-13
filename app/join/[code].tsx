@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Animated, { FadeInUp } from 'react-native-reanimated';
@@ -6,17 +7,43 @@ import { Screen } from '@/components/Screen';
 import { Button } from '@/components/Button';
 import { Avatar } from '@/components/Avatar';
 import { colors, radius, space, type } from '@/lib/theme';
-import { DEMO, TOM } from '@/lib/demo';
+import { formatPence } from '@/lib/money';
+import { backend } from '@/lib/backend';
+import { TOM } from '@/lib/demo';
 import { setIdentity } from '@/hooks/useIdentity';
 import { completeOnboarding } from '@/hooks/useProfile';
+import type { Pot } from '@/lib/types';
 
 export default function Join() {
   const { code } = useLocalSearchParams<{ code: string }>();
   const router = useRouter();
-  const valid = code === DEMO.INVITE_CODE;
+  const [pot, setPot] = useState<Pot | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [joining, setJoining] = useState(false);
 
-  const join = () => {
-    setIdentity(TOM.id); // joining device acts as Tom for the demo
+  useEffect(() => {
+    if (!code) {
+      setLoading(false);
+      return;
+    }
+    backend
+      .getPotByInviteCode(code)
+      .then(setPot)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [code]);
+
+  const join = async () => {
+    if (!pot || joining) return;
+    setJoining(true);
+    // Joining device acts as Tom for the two-phone demo.
+    setIdentity(TOM.id);
+    try {
+      await backend.joinPot(pot.id, TOM.id);
+      await backend.payStake(pot.id, TOM.id);
+    } catch {
+      // ignore — demo is forgiving
+    }
     completeOnboarding();
     router.replace('/(tabs)');
   };
@@ -27,18 +54,24 @@ export default function Join() {
         <Animated.View entering={FadeInUp.springify().damping(14)} style={styles.card}>
           <Avatar emoji="🤝" size={96} ring="lime" />
           <Text style={styles.kicker}>YOU’RE INVITED</Text>
-          <Text style={styles.title}>Cafe Cap September</Text>
-          <Text style={styles.goal}>Under £100 on cafes this month · £5 stake</Text>
+          <Text style={styles.title}>
+            {loading ? 'Finding your pot…' : pot ? pot.name : 'Pot not found'}
+          </Text>
+          <Text style={styles.goal}>
+            {pot ? `${pot.goal_label} · ${formatPence(pot.stake_pence)} stake` : `Code: ${code ?? '—'}`}
+          </Text>
           <View style={styles.codeBox}>
             <Text style={styles.codeLabel}>INVITE CODE</Text>
-            <Text style={[styles.code, !valid && { color: colors.red }]}>
-              {code ?? '—'}
-            </Text>
+            <Text style={[styles.code, !pot && !loading && { color: colors.red }]}>{code ?? '—'}</Text>
           </View>
         </Animated.View>
 
         <View style={styles.actions}>
-          <Button label={valid ? 'Join the pot' : 'Join anyway (demo)'} onPress={join} />
+          <Button
+            label={joining ? 'Joining…' : pot ? 'Join the pot' : 'Continue'}
+            onPress={pot ? join : () => router.replace('/(tabs)')}
+            disabled={loading || joining}
+          />
           <Button label="Maybe later" variant="ghost" onPress={() => router.replace('/(tabs)')} />
         </View>
       </View>

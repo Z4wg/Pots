@@ -30,7 +30,9 @@ export default function RootLayout() {
           }}>
           <Stack.Screen name="index" />
           <Stack.Screen name="onboarding" />
+          <Stack.Screen name="connect" />
           <Stack.Screen name="create" />
+          <Stack.Screen name="invite/[potId]" />
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="join/[code]" options={{ presentation: 'modal' }} />
         </Stack>

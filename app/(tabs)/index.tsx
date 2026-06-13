@@ -1,28 +1,61 @@
-import { useEffect, useRef, useState } from 'react';
-import { LayoutRectangle, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { LayoutRectangle, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import Animated, { LinearTransition } from 'react-native-reanimated';
 
 import { Screen } from '@/components/Screen';
 import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
-import { MemberTile } from '@/components/MemberTile';
+import { Avatar } from '@/components/Avatar';
+import { BetHealthBar } from '@/components/BetHealthBar';
 import { MoneyCounter } from '@/components/MoneyCounter';
 import { CheckInButton } from '@/components/CheckInButton';
 import { EventFeed } from '@/components/EventFeed';
 import { PayoutCoin, type CoinSpec } from '@/components/PayoutCoin';
 import { colors, radius, space, type } from '@/lib/theme';
 import { DEMO } from '@/lib/demo';
-import { USING_MOCK } from '@/lib/backend';
+import { backend, USING_MOCK } from '@/lib/backend';
 import { usePot } from '@/hooks/usePotRealtime';
 import { useIdentity } from '@/hooks/useIdentity';
-import { recordTransaction, resolveWindowEnd, checkIn } from '@/lib/pots';
-import { resetDemo } from '@/lib/seed';
+import { useProfile } from '@/hooks/useProfile';
+import { getArchetype } from '@/lib/archetypes';
+import { recordTransaction, resolveWindowEnd, checkIn, simulateDay, resetDemo } from '@/lib/pots';
+import type { BetType, Pot, PotMember } from '@/lib/types';
 
 const COIN = 44;
 
-export default function PotScreen() {
+const BET_LABEL: Record<BetType, string> = {
+  spend_freeze: 'Spend Freeze',
+  save_race: 'Save Race',
+  target_commit: 'Target Commit',
+};
+
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+export default function Home() {
   const me = useIdentity();
-  const { pot, members, events, loading, error, refresh } = usePot(DEMO.POT_ID);
+  const profile = useProfile();
+  const router = useRouter();
+  const myArche = getArchetype(profile.archetype);
+
+  const [pots, setPots] = useState<Pot[]>([]);
+  const [focusedId, setFocusedId] = useState<string>(DEMO.POT_ID);
+
+  const loadPots = useCallback(async () => {
+    const list = await backend.getPotsForUser(me.id);
+    setPots(list);
+    if (list.length && !list.some((p) => p.id === focusedId)) setFocusedId(list[0].id);
+  }, [me.id, focusedId]);
+
+  useEffect(() => {
+    loadPots();
+  }, [me.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const { pot, members, events, loading, refresh } = usePot(focusedId);
 
   const rects = useRef<Record<string, LayoutRectangle>>({});
   const [measureTick, setMeasureTick] = useState(0);
@@ -34,7 +67,6 @@ export default function PotScreen() {
     setMeasureTick((t) => t + 1);
   };
 
-  // Turn incoming 'redistribute' events into flying coins (the payout slide).
   useEffect(() => {
     const next: CoinSpec[] = [];
     for (const e of events) {
@@ -43,7 +75,7 @@ export default function PotScreen() {
       const toId = e.payload?.toUserId as string | undefined;
       const fromRect = fromId ? rects.current[fromId] : undefined;
       const toRect = toId ? rects.current[toId] : undefined;
-      if (!fromRect || !toRect) continue; // wait until both tiles measured
+      if (!fromRect || !toRect) continue;
       processed.current.add(e.id);
       next.push({
         id: e.id,
@@ -57,59 +89,101 @@ export default function PotScreen() {
 
   const onCoinArrive = (id: string) => setCoins((c) => c.filter((x) => x.id !== id));
 
+  const lowerBetter = pot?.bet_type === 'spend_freeze';
+  const ordered = [...members].sort((a, b) => {
+    const brokenRank = (m: PotMember) => (m.status === 'broken' ? 1 : 0);
+    if (brokenRank(a) !== brokenRank(b)) return brokenRank(a) - brokenRank(b);
+    return lowerBetter
+      ? a.current_value_pence - b.current_value_pence
+      : b.current_value_pence - a.current_value_pence;
+  });
+  const activeOrdered = ordered.filter((m) => m.status !== 'broken');
   const myMember = members.find((m) => m.user_id === me.id);
-  const allResolved = members.length > 0 && members.every((m) => m.status !== 'active');
+  const myRank = activeOrdered.findIndex((m) => m.user_id === me.id) + 1;
+  const daysLeft = pot
+    ? Math.max(0, Math.ceil((new Date(pot.window_end).getTime() - Date.now()) / 86400000))
+    : 0;
 
-  // Dev actions ------------------------------------------------------------
+  // Dev actions
+  const onSimulate = () => simulateDay(focusedId);
   const tomBuysCoffee = () =>
     recordTransaction(DEMO.POT_ID, DEMO.TOM_ID, 'Black Sheep Coffee', 'cafe', 3000);
-  const forceWindowEnd = () => resolveWindowEnd(DEMO.POT_ID);
+  const forceWindowEnd = () => resolveWindowEnd(focusedId);
   const onReset = async () => {
     processed.current = new Set();
     setCoins([]);
     await resetDemo();
+    await loadPots();
     refresh();
   };
 
   return (
-    <Screen glow={allResolved ? 'lime' : 'lime'}>
+    <Screen glow="lime">
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Header */}
+        {/* Header + archetype badge */}
         <View style={styles.header}>
-          <View>
-            <Text style={styles.kicker}>{USING_MOCK ? 'DEMO POT · LOCAL' : 'LIVE POT'}</Text>
-            <Text style={styles.potName}>{pot?.name ?? 'Loading…'}</Text>
-            <Text style={styles.goal}>{pot?.goal_label ?? ''}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.hi}>Hey {me.display_name}</Text>
+            <Text style={styles.kicker}>{USING_MOCK ? 'DEMO · LOCAL' : 'LIVE'}</Text>
+          </View>
+          <View style={styles.badge}>
+            <Text style={styles.badgeEmoji}>{myArche.emoji}</Text>
+            <Text style={styles.badgeText}>{myArche.title}</Text>
           </View>
         </View>
 
+        {/* Pot switcher */}
+        {pots.length > 1 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.switcher}>
+            {pots.map((p) => (
+              <Pressable
+                key={p.id}
+                onPress={() => setFocusedId(p.id)}
+                style={[styles.potChip, p.id === focusedId && styles.potChipOn]}>
+                <Text style={[styles.potChipText, p.id === focusedId && { color: colors.black }]}>
+                  {p.name}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        )}
+
+        {/* Hero */}
         <View style={styles.totalCard}>
-          <Text style={styles.totalLabel}>POT TOTAL</Text>
+          <Text style={styles.potName}>{pot?.name ?? 'Loading…'}</Text>
+          <Text style={styles.betType}>{pot ? BET_LABEL[pot.bet_type] : ''}</Text>
           <MoneyCounter
             value={pot?.pot_total_pence ?? 0}
             wholePounds
             style={styles.totalValue}
             color={colors.lime}
           />
-          <Text style={styles.totalSub}>
-            {members.length} {members.length === 1 ? 'player' : 'players'} ·{' '}
-            {members.filter((m) => m.status === 'active').length} still holding
-          </Text>
+          <View style={styles.metaRow}>
+            <Text style={styles.metaText}>⏳ {daysLeft} days left</Text>
+            {myMember && myRank > 0 && (
+              <Text style={styles.metaText}>
+                You’re {ordinal(myRank)} of {activeOrdered.length}
+              </Text>
+            )}
+          </View>
         </View>
 
-        {error && <Text style={styles.error}>{error}</Text>}
-
-        {/* Member tiles + flying coins overlay */}
+        {/* Leaderboard */}
         <View style={styles.board}>
-          {members.map((m) => (
-            <MemberTile
-              key={m.id}
-              member={m}
-              pot={pot!}
-              isMe={m.user_id === me.id}
-              onMeasure={onMeasure}
-            />
-          ))}
+          {pot &&
+            ordered.map((m) => (
+              <LeaderRow
+                key={m.id}
+                member={m}
+                pot={pot}
+                isMe={m.user_id === me.id}
+                lowerBetter={!!lowerBetter}
+                onMeasure={onMeasure}
+              />
+            ))}
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
             {coins.map((spec) => (
               <PayoutCoin key={spec.id} spec={spec} onArrive={onCoinArrive} />
@@ -118,42 +192,109 @@ export default function PotScreen() {
         </View>
 
         {loading && members.length === 0 && (
-          <Text style={styles.loading}>Connecting to the pot…</Text>
+          <Text style={styles.loading}>Loading the pot…</Text>
         )}
 
         {/* Check in */}
-        {myMember && myMember.status === 'active' ? (
-          <CheckInButton onCheckIn={() => checkIn(DEMO.POT_ID, me.id)} />
-        ) : myMember ? (
-          <Animated.View entering={FadeIn} style={styles.resolvedBanner}>
-            <Text
-              style={[
-                styles.resolvedText,
-                { color: myMember.status === 'broken' ? colors.red : colors.lime },
-              ]}>
-              {myMember.status === 'broken'
-                ? 'You broke your bet. Your stake moved on.'
-                : 'You held the line. 🏆'}
-            </Text>
-          </Animated.View>
-        ) : null}
+        {myMember && myMember.status === 'active' && (
+          <CheckInButton onCheckIn={() => checkIn(focusedId, me.id)} />
+        )}
 
-        {/* Live feed */}
+        {/* Feed */}
         <Card title="Live feed" style={{ marginTop: space.sm }}>
           <EventFeed events={events} />
         </Card>
 
-        {/* Dev row — clearly separated */}
+        <Button label="+ Start a new POT" variant="secondary" onPress={() => router.push('/create')} />
+
+        {/* Dev row */}
         <View style={styles.devRow}>
           <Text style={styles.devLabel}>⚙︎ DEMO CONTROLS (acting as {me.display_name})</Text>
           <View style={styles.devButtons}>
-            <Button label="Tom buys a £30 coffee" variant="danger" small onPress={tomBuysCoffee} />
+            <Button label="Simulate a day" small onPress={onSimulate} />
             <Button label="Force window end" variant="secondary" small onPress={forceWindowEnd} />
           </View>
-          <Button label="Reset demo" variant="ghost" small onPress={onReset} />
+          <View style={styles.devButtons}>
+            <Button label="Tom buys a £30 coffee" variant="danger" small onPress={tomBuysCoffee} />
+            <Button label="Reset demo" variant="ghost" small onPress={onReset} />
+          </View>
         </View>
       </ScrollView>
     </Screen>
+  );
+}
+
+function LeaderRow({
+  member,
+  pot,
+  isMe,
+  lowerBetter,
+  onMeasure,
+}: {
+  member: PotMember;
+  pot: Pot;
+  isMe: boolean;
+  lowerBetter: boolean;
+  onMeasure: (userId: string, layout: LayoutRectangle) => void;
+}) {
+  const broken = member.status === 'broken';
+  const archetype = getArchetype(member.archetype);
+  const value = lowerBetter ? member.spent_pence : member.current_value_pence;
+  const metric = lowerBetter ? 'spent' : 'saved';
+
+  const arrow =
+    member.prev_rank != null && member.rank != null && member.prev_rank !== member.rank
+      ? member.prev_rank > member.rank
+        ? { glyph: '▲', color: colors.lime }
+        : { glyph: '▼', color: colors.red }
+      : { glyph: '–', color: colors.textMute };
+
+  const saveRatio =
+    pot.threshold_pence > 0 ? Math.min(member.current_value_pence / pot.threshold_pence, 1) : 0;
+
+  return (
+    <Animated.View
+      layout={LinearTransition.springify().damping(18)}
+      onLayout={(e) => onMeasure(member.user_id, e.nativeEvent.layout)}
+      style={[styles.row, broken && styles.brokenRow, isMe && !broken && styles.meRow]}>
+      <View style={styles.rankCol}>
+        <Text style={styles.rankNum}>{broken ? '—' : (member.rank ?? '·')}</Text>
+        <Text style={[styles.arrow, { color: arrow.color }]}>{arrow.glyph}</Text>
+      </View>
+      <Avatar
+        emoji={member.avatar_emoji ?? archetype.emoji}
+        size={42}
+        ring={broken ? 'red' : member.status === 'won' ? 'lime' : isMe ? 'lime' : 'none'}
+      />
+      <View style={styles.rowMid}>
+        <View style={styles.nameLine}>
+          <Text style={styles.name}>{member.display_name ?? 'Member'}</Text>
+          {isMe && <Text style={styles.youTag}>YOU</Text>}
+        </View>
+        {lowerBetter ? (
+          <BetHealthBar
+            spentPence={member.spent_pence}
+            thresholdPence={pot.threshold_pence}
+            category={pot.category}
+            status={member.status}
+            comparator={pot.comparator}
+            compact
+          />
+        ) : (
+          <View style={styles.saveTrack}>
+            <View style={[styles.saveFill, { width: `${Math.max(saveRatio * 100, 3)}%` }]} />
+          </View>
+        )}
+      </View>
+      <View style={styles.rowRight}>
+        <MoneyCounter
+          value={value}
+          style={styles.rowValue}
+          color={broken ? colors.textMute : colors.text}
+        />
+        <Text style={styles.rowMetric}>{metric}</Text>
+      </View>
+    </Animated.View>
   );
 }
 
@@ -163,10 +304,33 @@ function center(r: LayoutRectangle) {
 
 const styles = StyleSheet.create({
   content: { padding: space.lg, paddingBottom: space.xxl, gap: space.md },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  kicker: { ...type.micro, color: colors.lime, letterSpacing: 1.4 },
-  potName: { ...type.title, color: colors.text, marginTop: 4 },
-  goal: { ...type.body, color: colors.textDim, marginTop: 2 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  hi: { ...type.title, color: colors.text },
+  kicker: { ...type.micro, color: colors.lime, letterSpacing: 1.4, marginTop: 2 },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.surface,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  badgeEmoji: { fontSize: 16 },
+  badgeText: { ...type.label, color: colors.text },
+  switcher: { gap: 8, paddingVertical: 2 },
+  potChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceLo,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  potChipOn: { backgroundColor: colors.lime, borderColor: colors.lime },
+  potChipText: { ...type.label, color: colors.text },
   totalCard: {
     backgroundColor: colors.surface,
     borderRadius: radius.xl,
@@ -174,23 +338,54 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(200,255,0,0.3)',
     padding: space.lg,
     alignItems: 'center',
-    gap: 4,
+    gap: 2,
   },
-  totalLabel: { ...type.micro, color: colors.textDim, letterSpacing: 1.5 },
-  totalValue: { fontSize: 72 },
-  totalSub: { ...type.caption, color: colors.textDim },
-  error: { ...type.caption, color: colors.red },
-  board: { gap: space.md, position: 'relative' },
+  potName: { ...type.h2, color: colors.text },
+  betType: { ...type.micro, color: colors.lime, letterSpacing: 1.2 },
+  totalValue: { fontSize: 64, marginTop: 4 },
+  metaRow: { flexDirection: 'row', gap: 16, marginTop: 6 },
+  metaText: { ...type.caption, color: colors.textDim },
+  board: { gap: 10, position: 'relative' },
   loading: { ...type.body, color: colors.textMute, textAlign: 'center', paddingVertical: space.lg },
-  resolvedBanner: {
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 18,
-    alignItems: 'center',
+    padding: 12,
   },
-  resolvedText: { ...type.h3 },
+  meRow: { borderColor: 'rgba(200,255,0,0.4)' },
+  brokenRow: { borderColor: 'rgba(255,77,77,0.5)', backgroundColor: 'rgba(255,77,77,0.06)' },
+  rankCol: { alignItems: 'center', width: 22 },
+  rankNum: { ...type.h3, color: colors.text },
+  arrow: { ...type.micro },
+  rowMid: { flex: 1, gap: 6 },
+  nameLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  name: { ...type.h3, color: colors.text },
+  youTag: {
+    ...type.micro,
+    color: colors.black,
+    backgroundColor: colors.lime,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+  },
+  saveTrack: {
+    height: 8,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceLo,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  saveFill: { height: '100%', borderRadius: radius.pill, backgroundColor: colors.lime },
+  rowRight: { alignItems: 'flex-end', minWidth: 64 },
+  rowValue: { fontSize: 18 },
+  rowMetric: { ...type.micro, color: colors.textMute },
   devRow: {
     marginTop: space.md,
     borderTopWidth: 1,

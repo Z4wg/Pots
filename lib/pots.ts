@@ -23,7 +23,12 @@ async function saveMember(m: PotMember): Promise<void> {
     spent_pence: m.spent_pence,
     current_streak: m.current_streak,
     status: m.status,
+    current_value_pence: m.current_value_pence,
   });
+}
+
+function rand(min: number, max: number): number {
+  return Math.floor(min + Math.random() * (max - min));
 }
 
 // ---------------------------------------------------------------------------
@@ -155,4 +160,83 @@ export async function recomputePotTotal(potId: string): Promise<void> {
 
 export async function resetDemo(): Promise<void> {
   await backend.resetDemo();
+}
+
+// ---------------------------------------------------------------------------
+// recomputeRanks — order members by their progress metric and persist rank +
+// prev_rank (so the leaderboard can show ▲▼). Still data-driven; no human input.
+// ---------------------------------------------------------------------------
+export async function recomputeRanks(potId: string): Promise<void> {
+  const pot = await backend.getPot(potId);
+  const all = await backend.getMembers(potId);
+  const active = all.filter((m) => m.status !== 'broken');
+  const lowerBetter = pot.bet_type === 'spend_freeze';
+  const sorted = [...active].sort((a, b) =>
+    lowerBetter
+      ? a.current_value_pence - b.current_value_pence
+      : b.current_value_pence - a.current_value_pence
+  );
+  for (let i = 0; i < sorted.length; i++) {
+    const m = sorted[i];
+    const newRank = i + 1;
+    if (m.rank !== newRank) {
+      const prev = m.rank ?? newRank;
+      await backend.updateMember(m.id, { prev_rank: prev, rank: newRank });
+      if (prev > newRank) {
+        const name = await backend.getUserName(m.user_id);
+        await insertEvent(potId, 'rank_up', name, { rank: newRank });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// simulateDay — demo control. Nudges each active member's bank figures, updates
+// their progress metric, recomputes ranks, and (for spend_freeze) auto-breaks
+// anyone who crosses their cap — which fires the payout slide. Data is referee.
+// ---------------------------------------------------------------------------
+export async function simulateDay(potId: string): Promise<void> {
+  const pot = await backend.getPot(potId);
+  const members = await backend.getMembers(potId);
+
+  for (const m of members) {
+    if (m.status !== 'active') continue;
+    const name = await backend.getUserName(m.user_id);
+    const conn = await backend.getBankConnection(m.user_id);
+
+    if (pot.bet_type === 'spend_freeze') {
+      const spend = rand(150, 1800);
+      m.spent_pence += spend;
+      m.current_value_pence = m.spent_pence;
+      await saveMember(m);
+      if (conn) {
+        conn.spend_by_category = {
+          ...conn.spend_by_category,
+          [pot.category]: (conn.spend_by_category[pot.category] ?? 0) + spend,
+        };
+        conn.balance_pence -= spend;
+        await backend.upsertBankConnection(conn);
+      }
+      await insertEvent(potId, 'spend', name, {
+        merchant: 'Daily spend',
+        category: pot.category,
+        amount: spend,
+      });
+      if (pot.comparator === 'under' && m.spent_pence > pot.threshold_pence) {
+        await breakBet(potId, m.user_id); // crosses cap -> payout slide
+      }
+    } else {
+      const saved = rand(500, 4000);
+      m.current_value_pence += saved;
+      await saveMember(m);
+      if (conn) {
+        conn.savings_balance_pence += saved;
+        conn.balance_pence -= saved;
+        await backend.upsertBankConnection(conn);
+      }
+      await insertEvent(potId, 'milestone', name, { saved, total: m.current_value_pence });
+    }
+  }
+
+  await recomputeRanks(potId);
 }

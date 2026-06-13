@@ -10,7 +10,7 @@ interface Profile {
   stakePence: number;
 }
 
-let state: Profile = { onboarded: false, archetype: 'traveller', stakePence: 500 };
+let state: Profile = { onboarded: false, archetype: 'strategist', stakePence: 500 };
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -52,7 +52,7 @@ export function completeOnboarding() {
 }
 
 export function resetOnboarding() {
-  state = { onboarded: false, archetype: 'traveller', stakePence: 500 };
+  state = { onboarded: false, archetype: 'strategist', stakePence: 500 };
   emit();
   persist();
 }
